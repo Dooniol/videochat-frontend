@@ -48,12 +48,15 @@ export default function App() {
             await handleAnswer(data.answer);
             break;
           case 'candidate':
-            if (data.candidate) {
-              await pcRef.current?.addIceCandidate(data.candidate);
+            if (data.candidate && pcRef.current) {
+              await pcRef.current.addIceCandidate(data.candidate);
             }
             break;
           case 'hangup':
             endCall();
+            break;
+          case 'error':
+            alert(`Errore server: ${data.message}`);
             break;
           default:
             console.warn('Unknown message type:', data.type);
@@ -82,7 +85,7 @@ export default function App() {
 
   // --- Helper: stop local media tracks ---
   function stopLocalStream() {
-    if (localVideoRef.current && localVideoRef.current.srcObject) {
+    if (localVideoRef.current?.srcObject) {
       localVideoRef.current.srcObject.getTracks().forEach((track) => track.stop());
       localVideoRef.current.srcObject = null;
     }
@@ -91,13 +94,11 @@ export default function App() {
   // --- Crea Peer Connection e gestisce eventi ---
   async function createPeerConnection() {
     const pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-      ],
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
     });
 
     pc.onicecandidate = (event) => {
-      if (event.candidate) {
+      if (event.candidate && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(
           JSON.stringify({ type: 'candidate', candidate: event.candidate })
         );
@@ -123,7 +124,6 @@ export default function App() {
         localVideoRef.current.srcObject = localStream;
       }
 
-      // Aggiungo tracce locali al peer connection
       localStream.getTracks().forEach((track) => {
         pcRef.current.addTrack(track, localStream);
       });
@@ -131,7 +131,7 @@ export default function App() {
       const offer = await pcRef.current.createOffer();
       await pcRef.current.setLocalDescription(offer);
 
-      wsRef.current.send(JSON.stringify({ type: 'offer', offer }));
+      wsRef.current?.send(JSON.stringify({ type: 'offer', offer }));
 
       setInCall(true);
       setIsScreenSharing(false);
@@ -156,11 +156,11 @@ export default function App() {
         pcRef.current.addTrack(track, localStream);
       });
 
-      await pcRef.current.setRemoteDescription(new RTCSessionDescription(offer));
+      await pcRef.current.setRemoteDescription(offer);
       const answer = await pcRef.current.createAnswer();
       await pcRef.current.setLocalDescription(answer);
 
-      wsRef.current.send(JSON.stringify({ type: 'answer', answer }));
+      wsRef.current?.send(JSON.stringify({ type: 'answer', answer }));
 
       setInCall(true);
       setIsScreenSharing(false);
@@ -174,12 +174,16 @@ export default function App() {
 
   // --- Handle answer ---
   async function handleAnswer(answer) {
-    await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+    if (pcRef.current) {
+      await pcRef.current.setRemoteDescription(answer);
+    }
   }
 
   // --- Termina chiamata ---
   function endCall() {
-    wsRef.current.send(JSON.stringify({ type: 'hangup' }));
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'hangup' }));
+    }
 
     if (pcRef.current) {
       pcRef.current.close();
@@ -227,19 +231,17 @@ export default function App() {
 
     try {
       const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-
       const screenTrack = screenStream.getVideoTracks()[0];
 
-      // Sostituisco la traccia video locale con quella dello schermo
       const sender = pcRef.current.getSenders().find((s) => s.track.kind === 'video');
-      sender.replaceTrack(screenTrack);
+      if (sender) {
+        await sender.replaceTrack(screenTrack);
+      }
 
-      // Quando termina condivisione schermo (utente chiude la condivisione)
       screenTrack.onended = () => {
         stopScreenShare();
       };
 
-      // Aggiorno video locale a mostrare condivisione schermo
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = screenStream;
       }
@@ -254,21 +256,21 @@ export default function App() {
   function stopScreenShare() {
     if (!isScreenSharing) return;
 
-    // Torna al video della webcam
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(async (stream) => {
       const videoTrack = stream.getVideoTracks()[0];
-      const audioTrack = stream.getAudioTracks()[0];
 
-      // Sostituisco la traccia video nel peer connection
       const sender = pcRef.current.getSenders().find((s) => s.track.kind === 'video');
-      sender.replaceTrack(videoTrack);
+      if (sender) {
+        await sender.replaceTrack(videoTrack);
+      }
 
-      // Aggiorno video locale
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
       }
 
       setIsScreenSharing(false);
+    }).catch((err) => {
+      alert('Errore nel ripristino webcam: ' + err.message);
     });
   }
 
@@ -299,11 +301,7 @@ export default function App() {
 
   // --- Ingrandisci solo un video (clic singolo) ---
   function maximizeVideo(which) {
-    if (maximizedVideo === which) {
-      setMaximizedVideo(null);
-    } else {
-      setMaximizedVideo(which);
-    }
+    setMaximizedVideo(maximizedVideo === which ? null : which);
   }
 
   // --- UI ---
@@ -328,24 +326,25 @@ export default function App() {
           <div
             style={{
               ...styles.videoWrapper,
-              flex: maximizedVideo === 'local' ? 1 : '1 1 45%',
+              flex: maximizedVideo === 'local' ? 1 : 0.5,
             }}
+            onClick={() => maximizeVideo('local')}
+            onDoubleClick={() => toggleFullScreenVideo(localVideoRef)}
           >
-            <h3>Video Locale</h3>
             <video
               ref={localVideoRef}
               autoPlay
               muted
               playsInline
               style={{
-                ...styles.video,
-                cursor: 'pointer',
                 width: '100%',
-                height: maximizedVideo === 'local' ? '80vh' : 'auto',
+                height: '100%',
+                objectFit: 'cover',
+                borderRadius: 8,
+                backgroundColor: 'black',
               }}
-              onClick={() => maximizeVideo('local')}
-              onDoubleClick={() => toggleFullScreenVideo(localVideoRef)}
             />
+            <div style={styles.label}>Local Video</div>
           </div>
         )}
 
@@ -353,63 +352,53 @@ export default function App() {
           <div
             style={{
               ...styles.videoWrapper,
-              flex: maximizedVideo === 'remote' ? 1 : '1 1 45%',
+              flex: maximizedVideo === 'remote' ? 1 : 0.5,
             }}
+            onClick={() => maximizeVideo('remote')}
+            onDoubleClick={() => toggleFullScreenVideo(remoteVideoRef)}
           >
-            <h3>Video Remoto</h3>
             <video
               ref={remoteVideoRef}
               autoPlay
               playsInline
               style={{
-                ...styles.video,
-                cursor: 'pointer',
                 width: '100%',
-                height: maximizedVideo === 'remote' ? '80vh' : 'auto',
+                height: '100%',
+                objectFit: 'cover',
+                borderRadius: 8,
+                backgroundColor: 'black',
               }}
-              onClick={() => maximizeVideo('remote')}
-              onDoubleClick={() => toggleFullScreenVideo(remoteVideoRef)}
             />
+            <div style={styles.label}>Remote Video</div>
           </div>
         )}
       </div>
 
-      <div style={styles.buttonsContainer}>
+      <div style={styles.controls}>
         {!inCall && (
-          <button onClick={startCall} disabled={!isConnected} style={styles.button}>
+          <button onClick={startCall} disabled={!isConnected}>
             Avvia Chiamata
           </button>
         )}
-
         {inCall && (
           <>
-            <button onClick={endCall} style={styles.buttonRed}>
-              Termina Chiamata
-            </button>
-
-            <button onClick={toggleAudio} style={styles.button}>
+            <button onClick={toggleAudio}>
               {audioEnabled ? 'Disattiva Microfono' : 'Attiva Microfono'}
             </button>
-
-            <button onClick={toggleVideo} style={styles.button}>
+            <button onClick={toggleVideo}>
               {videoEnabled ? 'Disattiva Video' : 'Attiva Video'}
             </button>
-
-            <button onClick={toggleScreenShare} style={styles.button}>
-              {isScreenSharing ? 'Ferma Condivisione Schermo' : 'Condividi Schermo'}
+            <button onClick={toggleScreenShare}>
+              {isScreenSharing ? 'Termina Condivisione Schermo' : 'Condividi Schermo'}
             </button>
-
-            <button onClick={toggleFullScreen} style={styles.button}>
-              {document.fullscreenElement ? 'Esci Fullscreen' : 'Fullscreen'}
+            <button onClick={endCall} style={{ backgroundColor: '#d33', color: 'white' }}>
+              Termina Chiamata
             </button>
-
-            {maximizedVideo && (
-              <button onClick={() => setMaximizedVideo(null)} style={styles.button}>
-                Esci Ingrandimento
-              </button>
-            )}
           </>
         )}
+        <button onClick={toggleFullScreen} style={{ marginLeft: 15 }}>
+          {document.fullscreenElement ? 'Esci Fullscreen' : 'Fullscreen'}
+        </button>
       </div>
     </div>
   );
@@ -417,48 +406,40 @@ export default function App() {
 
 const styles = {
   container: {
-    fontFamily: 'Arial, sans-serif',
     maxWidth: 900,
-    margin: 'auto',
-    padding: 20,
-    textAlign: 'center',
+    margin: '20px auto',
+    fontFamily: 'Arial, sans-serif',
+    userSelect: 'none',
   },
   videosContainer: {
     display: 'flex',
-    justifyContent: 'space-around',
-    marginBottom: 20,
-    flexWrap: 'nowrap',
-    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+    height: 300,
   },
   videoWrapper: {
-    marginBottom: 10,
-  },
-  video: {
-    maxHeight: 480,
-    backgroundColor: '#000',
+    position: 'relative',
+    cursor: 'pointer',
+    backgroundColor: 'black',
     borderRadius: 8,
+    overflow: 'hidden',
   },
-  buttonsContainer: {
+  label: {
+    position: 'absolute',
+    bottom: 4,
+    left: 6,
+    padding: '2px 6px',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    color: 'white',
+    fontSize: 12,
+    borderRadius: 4,
+    userSelect: 'none',
+  },
+  controls: {
     display: 'flex',
-    justifyContent: 'center',
-    gap: 15,
+    gap: 8,
     flexWrap: 'wrap',
-  },
-  button: {
-    padding: '10px 15px',
-    fontSize: 14,
-    cursor: 'pointer',
-    borderRadius: 4,
-    border: '1px solid #333',
-    backgroundColor: '#eee',
-  },
-  buttonRed: {
-    padding: '10px 15px',
-    fontSize: 14,
-    cursor: 'pointer',
-    borderRadius: 4,
-    border: '1px solid #900',
-    backgroundColor: '#fdd',
-    color: '#900',
+    justifyContent: 'center',
+    marginTop: 10,
   },
 };
