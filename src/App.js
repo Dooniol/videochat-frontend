@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-const SIGNALING_SERVER_URL = 'ws://localhost:8080';
+const SIGNALING_SERVER_URL = 'wss://videochat-signaling-server.onrender.com';
 
 export default function App() {
   // Riferimenti ai video locali e remoti
