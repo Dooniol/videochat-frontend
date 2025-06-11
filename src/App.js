@@ -255,35 +255,67 @@ export default function App() {
   }
 
   // --- Toggle Condivisione Schermo ---
-  async function toggleScreenShare() {
-    if (isScreenSharing) {
-      stopScreenShare();
-      return;
-    }
-
-    try {
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-      const screenTrack = screenStream.getVideoTracks()[0];
-
-      const sender = pcRef.current.getSenders().find((s) => s.track.kind === 'video');
-      if (sender) {
-        await sender.replaceTrack(screenTrack);
-      }
-
-      screenTrack.onended = () => {
-        stopScreenShare();
-      };
-
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = screenStream;
-      }
-
-      setIsScreenSharing(true);
-      setVideoEnabled(true);
-    } catch (err) {
-      alert('Errore nella condivisione schermo: ' + err.message);
-    }
+async function toggleScreenShare() {
+  if (isScreenSharing) {
+    stopScreenShare();
+    return;
   }
+
+  try {
+    // Acquisizione schermo con *eventuale* audio del sistema
+    const screenStream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: true  // ← importante!
+    });
+
+    // Acquisizione microfono
+    const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+    // Combina audio del sistema (se disponibile) + microfono
+    const combinedStream = new MediaStream();
+
+    // Aggiungi video dallo schermo
+    screenStream.getVideoTracks().forEach((track) => {
+      combinedStream.addTrack(track);
+    });
+
+    // Aggiungi tracce audio: prima microfono, poi (opzionale) audio di sistema
+    micStream.getAudioTracks().forEach((track) => {
+      combinedStream.addTrack(track);
+    });
+
+    screenStream.getAudioTracks().forEach((track) => {
+      combinedStream.addTrack(track);
+    });
+
+    // Sostituisci tracce nel peer connection
+    const videoSender = pcRef.current.getSenders().find((s) => s.track?.kind === 'video');
+    const audioSender = pcRef.current.getSenders().find((s) => s.track?.kind === 'audio');
+
+    if (videoSender) {
+      await videoSender.replaceTrack(combinedStream.getVideoTracks()[0]);
+    }
+
+    if (audioSender && combinedStream.getAudioTracks().length > 0) {
+      await audioSender.replaceTrack(combinedStream.getAudioTracks()[0]);
+    }
+
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = combinedStream;
+    }
+
+    // Ferma la condivisione se l’utente chiude manualmente
+    screenStream.getVideoTracks()[0].onended = () => {
+      stopScreenShare();
+    };
+
+    setIsScreenSharing(true);
+    setVideoEnabled(true);
+  } catch (err) {
+    alert('Errore nella condivisione schermo: ' + err.message);
+  }
+}
+
 
   function stopScreenShare() {
     if (!isScreenSharing) return;
