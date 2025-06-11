@@ -40,6 +40,8 @@ export default function App() {
           return;
         }
 
+        console.log('Messaggio WebSocket ricevuto:', data); // <-- LOG
+
         switch (data.type) {
           case 'offer':
             await handleOffer(data.offer);
@@ -49,7 +51,12 @@ export default function App() {
             break;
           case 'candidate':
             if (data.candidate && pcRef.current) {
-              await pcRef.current.addIceCandidate(data.candidate);
+              if (pcRef.current.remoteDescription) {
+                await pcRef.current.addIceCandidate(data.candidate);
+                console.log('Ice candidate aggiunto:', data.candidate);
+              } else {
+                console.warn('Remote description non settata, candidato scartato:', data.candidate);
+              }
             }
             break;
           case 'hangup':
@@ -106,6 +113,7 @@ export default function App() {
     };
 
     pc.ontrack = (event) => {
+      console.log('Evento ontrack ricevuto:', event); // <-- LOG
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = event.streams[0];
       }
@@ -145,6 +153,8 @@ export default function App() {
 
   // --- Handle offer (chiamata in ingresso) ---
   async function handleOffer(offer) {
+    console.log('Ricevuto offer, setto remote description:', offer); // <-- LOG
+
     await createPeerConnection();
 
     try {
@@ -174,6 +184,7 @@ export default function App() {
 
   // --- Handle answer ---
   async function handleAnswer(answer) {
+    console.log('Ricevuto answer, setto remote description:', answer); // <-- LOG
     if (pcRef.current) {
       await pcRef.current.setRemoteDescription(answer);
     }
@@ -374,10 +385,10 @@ export default function App() {
         )}
       </div>
 
-      <div style={styles.controls}>
+      <div style={styles.buttonsContainer}>
         {!inCall && (
           <button onClick={startCall} disabled={!isConnected}>
-            Avvia Chiamata
+            Avvia chiamata
           </button>
         )}
         {inCall && (
@@ -391,14 +402,10 @@ export default function App() {
             <button onClick={toggleScreenShare}>
               {isScreenSharing ? 'Termina Condivisione Schermo' : 'Condividi Schermo'}
             </button>
-            <button onClick={endCall} style={{ backgroundColor: '#d33', color: 'white' }}>
-              Termina Chiamata
-            </button>
+            <button onClick={endCall}>Termina chiamata</button>
           </>
         )}
-        <button onClick={toggleFullScreen} style={{ marginLeft: 15 }}>
-          {document.fullscreenElement ? 'Esci Fullscreen' : 'Fullscreen'}
-        </button>
+        <button onClick={toggleFullScreen}>Fullscreen container</button>
       </div>
     </div>
   );
@@ -406,40 +413,39 @@ export default function App() {
 
 const styles = {
   container: {
-    maxWidth: 900,
-    margin: '20px auto',
+    padding: 10,
     fontFamily: 'Arial, sans-serif',
+    maxWidth: 900,
+    margin: 'auto',
     userSelect: 'none',
   },
   videosContainer: {
     display: 'flex',
     gap: 10,
     marginBottom: 10,
-    height: 300,
+    height: 360,
   },
   videoWrapper: {
     position: 'relative',
-    cursor: 'pointer',
-    backgroundColor: 'black',
+    backgroundColor: '#000',
     borderRadius: 8,
+    cursor: 'pointer',
     overflow: 'hidden',
   },
   label: {
     position: 'absolute',
-    bottom: 4,
-    left: 6,
+    bottom: 5,
+    left: 5,
+    color: '#fff',
+    backgroundColor: 'rgba(0,0,0,0.4)',
     padding: '2px 6px',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    color: 'white',
-    fontSize: 12,
     borderRadius: 4,
+    fontSize: 12,
     userSelect: 'none',
   },
-  controls: {
+  buttonsContainer: {
     display: 'flex',
-    gap: 8,
+    gap: 10,
     flexWrap: 'wrap',
-    justifyContent: 'center',
-    marginTop: 10,
   },
 };
