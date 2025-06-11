@@ -9,6 +9,8 @@ export default function App() {
 
   const pcRef = useRef(null);
   const wsRef = useRef(null);
+
+  // Per accodare candidati ICE ricevuti prima di setRemoteDescription
   const pendingCandidatesRef = useRef([]);
 
   const [isConnected, setIsConnected] = useState(false);
@@ -56,7 +58,8 @@ export default function App() {
                 await pcRef.current.addIceCandidate(data.candidate);
                 console.log('Ice candidate aggiunto:', data.candidate);
               } else {
-                console.log('Remote description non ancora settata, candidato salvato in pending');
+                // Accoda candidato finché non c'è remote description
+                console.log('Accodato candidato ICE in attesa di remote description:', data.candidate);
                 pendingCandidatesRef.current.push(data.candidate);
               }
             }
@@ -170,13 +173,10 @@ export default function App() {
 
       await pcRef.current.setRemoteDescription(offer);
 
-      // Aggiungi i candidati pendenti
+      // Dopo setRemoteDescription aggiungiamo candidati pendenti
       for (const candidate of pendingCandidatesRef.current) {
-        try {
-          await pcRef.current.addIceCandidate(candidate);
-        } catch (e) {
-          console.error('Errore aggiungendo candidato pendente:', e);
-        }
+        await pcRef.current.addIceCandidate(candidate);
+        console.log('Ice candidate pendente aggiunto:', candidate);
       }
       pendingCandidatesRef.current = [];
 
@@ -201,13 +201,10 @@ export default function App() {
     if (pcRef.current) {
       await pcRef.current.setRemoteDescription(answer);
 
-      // Aggiungi i candidati pendenti
+      // Anche qui aggiungiamo eventuali candidati pendenti (nel caso raro)
       for (const candidate of pendingCandidatesRef.current) {
-        try {
-          await pcRef.current.addIceCandidate(candidate);
-        } catch (e) {
-          console.error('Errore aggiungendo candidato pendente:', e);
-        }
+        await pcRef.current.addIceCandidate(candidate);
+        console.log('Ice candidate pendente aggiunto dopo answer:', candidate);
       }
       pendingCandidatesRef.current = [];
     }
@@ -232,6 +229,7 @@ export default function App() {
     setInCall(false);
     setIsScreenSharing(false);
     setMaximizedVideo(null);
+    pendingCandidatesRef.current = [];
   }
 
   // --- Toggle Microfono ---
@@ -310,12 +308,12 @@ export default function App() {
 
   // --- Fullscreen container ---
   function toggleFullScreen() {
-    if (!document.fullscreenElement) {
+    if (!document.fullscreenElement && containerRef.current) {
       containerRef.current.requestFullscreen().catch((err) => {
         alert(`Errore nel fullscreen: ${err.message}`);
       });
     } else {
-      document.exitFullscreen();
+      document.exitFullscreen().catch(() => {});
     }
   }
 
@@ -329,7 +327,7 @@ export default function App() {
         alert(`Errore nel fullscreen video: ${err.message}`);
       });
     } else {
-      document.exitFullscreen();
+      document.exitFullscreen().catch(() => {});
     }
   }
 
@@ -340,62 +338,94 @@ export default function App() {
 
   // --- UI ---
   return (
-    <div
-      ref={containerRef}
-      className={`container ${maximizedVideo === 'local' ? 'max-local' : ''} ${maximizedVideo === 'remote' ? 'max-remote' : ''}`}
-      style={{ width: '100vw', height: '100vh', backgroundColor: 'black', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}
-    >
-      <h1 style={{ color: 'white' }}>Video Chat</h1>
+    <div style={styles.container} ref={containerRef}>
+      <h1>Videochiamata 1:1 con Screen Sharing e Fullscreen</h1>
 
-      <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginBottom: 10 }}>
-        {!inCall && (
-          <button onClick={startCall} disabled={!isConnected}>
-            Avvia chiamata
-          </button>
-        )}
-        {inCall && (
-          <>
-            <button onClick={endCall}>Termina chiamata</button>
-            <button onClick={toggleAudio}>{audioEnabled ? 'Disattiva microfono' : 'Attiva microfono'}</button>
-            <button onClick={toggleVideo}>{videoEnabled ? 'Disattiva video' : 'Attiva video'}</button>
-            <button onClick={toggleScreenShare}>{isScreenSharing ? 'Ferma condivisione schermo' : 'Condividi schermo'}</button>
-          </>
-        )}
-        <button onClick={toggleFullScreen}>Fullscreen finestra</button>
+      <div style={{ marginBottom: 10 }}>
+        <strong>Status:</strong>{' '}
+        {!isConnected && 'Non connesso al signaling server'}
+        {isConnected && !inCall && 'Connesso, pronto per chiamare'}
+        {inCall && 'In chiamata'}
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'center',
+          gap: 10,
+          flexWrap: 'wrap',
+        }}
+      >
         <video
           ref={localVideoRef}
           autoPlay
           muted
           playsInline
+          style={{
+            ...styles.video,
+            border: maximizedVideo === 'local' ? '4px solid #4caf50' : '2px solid #ccc',
+            flexGrow: maximizedVideo === 'local' ? 1 : 0,
+            width: maximizedVideo === 'local' ? '80vw' : 160,
+            height: maximizedVideo === 'local' ? '60vh' : 120,
+            cursor: 'pointer',
+          }}
           onClick={() => maximizeVideo('local')}
           onDoubleClick={() => toggleFullScreenVideo(localVideoRef)}
-          style={{
-            width: maximizedVideo === 'local' ? '80vw' : '300px',
-            height: maximizedVideo === 'local' ? '80vh' : '225px',
-            backgroundColor: 'black',
-            cursor: 'pointer',
-            border: '2px solid white',
-          }}
+          title="Tuo video (clic singolo per ingrandire, doppio per fullscreen)"
         />
 
         <video
           ref={remoteVideoRef}
           autoPlay
           playsInline
+          style={{
+            ...styles.video,
+            border: maximizedVideo === 'remote' ? '4px solid #2196f3' : '2px solid #ccc',
+            flexGrow: maximizedVideo === 'remote' ? 1 : 0,
+            width: maximizedVideo === 'remote' ? '80vw' : 160,
+            height: maximizedVideo === 'remote' ? '60vh' : 120,
+            cursor: 'pointer',
+          }}
           onClick={() => maximizeVideo('remote')}
           onDoubleClick={() => toggleFullScreenVideo(remoteVideoRef)}
-          style={{
-            width: maximizedVideo === 'remote' ? '80vw' : '300px',
-            height: maximizedVideo === 'remote' ? '80vh' : '225px',
-            backgroundColor: 'black',
-            cursor: 'pointer',
-            border: '2px solid white',
-          }}
+          title="Video interlocutore (clic singolo per ingrandire, doppio per fullscreen)"
         />
+      </div>
+
+      <div style={{ marginTop: 15, display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+        {!inCall && (
+          <button onClick={startCall} disabled={!isConnected}>
+            Avvia Chiamata
+          </button>
+        )}
+        {inCall && (
+          <>
+            <button onClick={endCall}>Termina Chiamata</button>
+            <button onClick={toggleAudio}>
+              {audioEnabled ? 'Disattiva Microfono' : 'Attiva Microfono'}
+            </button>
+            <button onClick={toggleVideo}>
+              {videoEnabled ? 'Disattiva Video' : 'Attiva Video'}
+            </button>
+            <button onClick={toggleScreenShare}>
+              {isScreenSharing ? 'Interrompi Condivisione Schermo' : 'Condividi Schermo'}
+            </button>
+            <button onClick={toggleFullScreen}>Fullscreen Container</button>
+          </>
+        )}
       </div>
     </div>
   );
 }
+
+const styles = {
+  container: {
+    textAlign: 'center',
+    padding: 10,
+  },
+  video: {
+    backgroundColor: '#000',
+    borderRadius: 8,
+    objectFit: 'cover',
+  },
+};
