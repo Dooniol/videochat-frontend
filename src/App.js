@@ -3,27 +3,21 @@ import React, { useEffect, useRef, useState } from 'react';
 const SIGNALING_SERVER_URL = 'wss://videochat-signaling-server.onrender.com';
 
 export default function App() {
-  // Riferimenti ai video locali e remoti
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  const containerRef = useRef(null);
 
-  // Riferimento alla connessione WebRTC
   const pcRef = useRef(null);
-
-  // Riferimento alla connessione WebSocket
   const wsRef = useRef(null);
 
-  // Stato generale chiamata
-  const [isConnected, setIsConnected] = useState(false);  // WebSocket connesso
-  const [inCall, setInCall] = useState(false);            // Siamo in chiamata
-  const [isScreenSharing, setIsScreenSharing] = useState(false); // Schermo condiviso
-  const [audioEnabled, setAudioEnabled] = useState(true);  // Microfono attivo
-  const [videoEnabled, setVideoEnabled] = useState(true);  // Video attivo
+  const [isConnected, setIsConnected] = useState(false);
+  const [inCall, setInCall] = useState(false);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [audioEnabled, setAudioEnabled] = useState(true);
+  const [videoEnabled, setVideoEnabled] = useState(true);
+  const [maximizedVideo, setMaximizedVideo] = useState(null); // 'local' | 'remote' | null
 
-  // Stream locale per manipolare tracce audio/video
-  const localStreamRef = useRef(null);
-
-  // useEffect di inizializzazione: connessione WebSocket signaling
+  // --- WebSocket e gestione signaling ---
   useEffect(() => {
     wsRef.current = new WebSocket(SIGNALING_SERVER_URL);
 
@@ -34,8 +28,17 @@ export default function App() {
 
     wsRef.current.onmessage = async (message) => {
       try {
-        const data = JSON.parse(message.data);
-        console.log('Received:', data);
+        let data;
+
+        if (typeof message.data === 'string') {
+          data = JSON.parse(message.data);
+        } else if (message.data instanceof Blob) {
+          console.warn('Ricevuto Blob via WebSocket, non è JSON:', message.data);
+          return;
+        } else {
+          console.warn('Tipo di dato non previsto:', typeof message.data);
+          return;
+        }
 
         switch (data.type) {
           case 'offer':
@@ -50,7 +53,6 @@ export default function App() {
             }
             break;
           case 'hangup':
-            // L'altro peer ha terminato la chiamata
             endCall();
             break;
           default:
@@ -68,11 +70,9 @@ export default function App() {
     wsRef.current.onclose = () => {
       console.log('WebSocket closed');
       setIsConnected(false);
-      // Se siamo in chiamata, termina tutto
       if (inCall) endCall();
     };
 
-    // Cleanup al dismount
     return () => {
       wsRef.current?.close();
       pcRef.current?.close();
@@ -80,229 +80,237 @@ export default function App() {
     };
   }, []);
 
-  // Funzione per creare e configurare la connessione WebRTC
+  // --- Helper: stop local media tracks ---
+  function stopLocalStream() {
+    if (localVideoRef.current && localVideoRef.current.srcObject) {
+      localVideoRef.current.srcObject.getTracks().forEach((track) => track.stop());
+      localVideoRef.current.srcObject = null;
+    }
+  }
+
+  // --- Crea Peer Connection e gestisce eventi ---
   async function createPeerConnection() {
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+      ],
     });
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        sendMessage({ type: 'candidate', candidate: event.candidate });
+        wsRef.current.send(
+          JSON.stringify({ type: 'candidate', candidate: event.candidate })
+        );
       }
     };
 
     pc.ontrack = (event) => {
-      console.log('Remote track received');
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = event.streams[0];
-      }
-    };
-
-    pc.onconnectionstatechange = () => {
-      console.log('PeerConnection state:', pc.connectionState);
-      // Se la connessione si chiude o fallisce, termina la chiamata
-      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-        endCall();
       }
     };
 
     pcRef.current = pc;
   }
 
-  // Funzione di invio messaggi al signaling server
-  function sendMessage(message) {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(message));
-    }
-  }
-
-  // Ottiene lo stream locale (audio/video)
-  async function getLocalStream() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      localStreamRef.current = stream;
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
-      return stream;
-    } catch (e) {
-      console.error('Error accessing local media', e);
-      alert('Impossibile accedere a microfono o webcam.');
-      throw e;
-    }
-  }
-
-  // Avvia chiamata: crea connessione, stream e invia offerta
+  // --- Start chiamata ---
   async function startCall() {
-    if (!isConnected) {
-      alert('Non sei connesso al signaling server.');
-      return;
+    await createPeerConnection();
+
+    try {
+      const localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = localStream;
+      }
+
+      // Aggiungo tracce locali al peer connection
+      localStream.getTracks().forEach((track) => {
+        pcRef.current.addTrack(track, localStream);
+      });
+
+      const offer = await pcRef.current.createOffer();
+      await pcRef.current.setLocalDescription(offer);
+
+      wsRef.current.send(JSON.stringify({ type: 'offer', offer }));
+
+      setInCall(true);
+      setIsScreenSharing(false);
+      setAudioEnabled(true);
+      setVideoEnabled(true);
+      setMaximizedVideo(null);
+    } catch (err) {
+      alert('Errore nell\'ottenere media locale: ' + err.message);
     }
-    await createPeerConnection();
-
-    const stream = await getLocalStream();
-
-    // Aggiunge tracce locali alla PeerConnection
-    stream.getTracks().forEach(track => pcRef.current.addTrack(track, stream));
-
-    // Crea offerta SDP
-    const offer = await pcRef.current.createOffer();
-    await pcRef.current.setLocalDescription(offer);
-
-    sendMessage({ type: 'offer', offer });
-    setInCall(true);
   }
 
-  // Gestisce offerta ricevuta: risponde con answer
+  // --- Handle offer (chiamata in ingresso) ---
   async function handleOffer(offer) {
-    if (!isConnected) return;
     await createPeerConnection();
 
-    const stream = await getLocalStream();
+    try {
+      const localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = localStream;
+      }
+      localStream.getTracks().forEach((track) => {
+        pcRef.current.addTrack(track, localStream);
+      });
 
-    stream.getTracks().forEach(track => pcRef.current.addTrack(track, stream));
+      await pcRef.current.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pcRef.current.createAnswer();
+      await pcRef.current.setLocalDescription(answer);
 
-    await pcRef.current.setRemoteDescription(new RTCSessionDescription(offer));
+      wsRef.current.send(JSON.stringify({ type: 'answer', answer }));
 
-    const answer = await pcRef.current.createAnswer();
-    await pcRef.current.setLocalDescription(answer);
-
-    sendMessage({ type: 'answer', answer });
-    setInCall(true);
+      setInCall(true);
+      setIsScreenSharing(false);
+      setAudioEnabled(true);
+      setVideoEnabled(true);
+      setMaximizedVideo(null);
+    } catch (err) {
+      alert('Errore nell\'ottenere media locale per risposta: ' + err.message);
+    }
   }
 
-  // Gestisce risposta answer ricevuta
+  // --- Handle answer ---
   async function handleAnswer(answer) {
-    if (!pcRef.current) return;
     await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
   }
 
-  // Gestione ICE candidate ricevuti
-  // (già fatto dentro onmessage)
-
-  // Funzione per terminare chiamata
+  // --- Termina chiamata ---
   function endCall() {
-    console.log('Call ended');
-    setInCall(false);
-    setIsScreenSharing(false);
-    setAudioEnabled(true);
-    setVideoEnabled(true);
+    wsRef.current.send(JSON.stringify({ type: 'hangup' }));
 
-    // Chiudo connessione WebRTC
     if (pcRef.current) {
       pcRef.current.close();
       pcRef.current = null;
     }
+    stopLocalStream();
 
-    // Pulisco video remoto
     if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = null;
     }
 
-    // Ferma stream locale
-    stopLocalStream();
-
-    // Invia messaggio hangup all'altro peer (se connesso)
-    sendMessage({ type: 'hangup' });
+    setInCall(false);
+    setIsScreenSharing(false);
+    setMaximizedVideo(null);
   }
 
-  // Funzione che ferma lo stream locale (microfono e webcam)
-  function stopLocalStream() {
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => track.stop());
-      localStreamRef.current = null;
-    }
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = null;
-    }
-  }
-
-  // Muta o attiva microfono
+  // --- Toggle Microfono ---
   function toggleAudio() {
-    if (!localStreamRef.current) return;
-    const enabled = !audioEnabled;
-    localStreamRef.current.getAudioTracks().forEach(track => {
-      track.enabled = enabled;
-    });
-    setAudioEnabled(enabled);
+    if (!localVideoRef.current?.srcObject) return;
+
+    const audioTracks = localVideoRef.current.srcObject.getAudioTracks();
+    if (audioTracks.length === 0) return;
+
+    audioTracks[0].enabled = !audioTracks[0].enabled;
+    setAudioEnabled(audioTracks[0].enabled);
   }
 
-  // Disabilita o abilita video
+  // --- Toggle Video ---
   function toggleVideo() {
-    if (!localStreamRef.current) return;
-    const enabled = !videoEnabled;
-    localStreamRef.current.getVideoTracks().forEach(track => {
-      track.enabled = enabled;
-    });
-    setVideoEnabled(enabled);
+    if (!localVideoRef.current?.srcObject) return;
+
+    const videoTracks = localVideoRef.current.srcObject.getVideoTracks();
+    if (videoTracks.length === 0) return;
+
+    videoTracks[0].enabled = !videoTracks[0].enabled;
+    setVideoEnabled(videoTracks[0].enabled);
   }
 
-  // Avvia o ferma la condivisione dello schermo
+  // --- Toggle Condivisione Schermo ---
   async function toggleScreenShare() {
-    if (!pcRef.current) return;
-
     if (isScreenSharing) {
-      // Torna alla webcam
-      await stopScreenShare();
-    } else {
-      // Avvia condivisione schermo
-      await startScreenShare();
+      stopScreenShare();
+      return;
     }
-  }
 
-  // Inizio condivisione schermo sostituendo track video
-  async function startScreenShare() {
     try {
       const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
 
-      const sender = pcRef.current.getSenders().find(s => s.track.kind === 'video');
-      if (sender) {
-        sender.replaceTrack(screenStream.getVideoTracks()[0]);
-      }
+      const screenTrack = screenStream.getVideoTracks()[0];
 
-      // Quando l'utente smette di condividere lo schermo
-      screenStream.getVideoTracks()[0].onended = () => {
+      // Sostituisco la traccia video locale con quella dello schermo
+      const sender = pcRef.current.getSenders().find((s) => s.track.kind === 'video');
+      sender.replaceTrack(screenTrack);
+
+      // Quando termina condivisione schermo (utente chiude la condivisione)
+      screenTrack.onended = () => {
         stopScreenShare();
       };
 
-      // Mostra nel video locale lo schermo condiviso
+      // Aggiorno video locale a mostrare condivisione schermo
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = screenStream;
       }
 
       setIsScreenSharing(true);
       setVideoEnabled(true);
-    } catch (e) {
-      console.error('Errore condivisione schermo:', e);
-      alert('Impossibile condividere lo schermo.');
+    } catch (err) {
+      alert('Errore nella condivisione schermo: ' + err.message);
     }
   }
 
-  // Ferma condivisione schermo e torna webcam
-  async function stopScreenShare() {
-    try {
-      const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
-      const sender = pcRef.current.getSenders().find(s => s.track.kind === 'video');
-      if (sender) {
-        sender.replaceTrack(videoStream.getVideoTracks()[0]);
-      }
-      localStreamRef.current = videoStream;
+  function stopScreenShare() {
+    if (!isScreenSharing) return;
+
+    // Torna al video della webcam
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {
+      const videoTrack = stream.getVideoTracks()[0];
+      const audioTrack = stream.getAudioTracks()[0];
+
+      // Sostituisco la traccia video nel peer connection
+      const sender = pcRef.current.getSenders().find((s) => s.track.kind === 'video');
+      sender.replaceTrack(videoTrack);
+
+      // Aggiorno video locale
       if (localVideoRef.current) {
-        localVideoRef.current.srcObject = videoStream;
+        localVideoRef.current.srcObject = stream;
       }
+
       setIsScreenSharing(false);
-      setVideoEnabled(true);
-    } catch (e) {
-      console.error('Errore stop condivisione schermo:', e);
+    });
+  }
+
+  // --- Fullscreen container ---
+  function toggleFullScreen() {
+    if (!document.fullscreenElement) {
+      containerRef.current.requestFullscreen().catch((err) => {
+        alert(`Errore nel fullscreen: ${err.message}`);
+      });
+    } else {
+      document.exitFullscreen();
     }
   }
 
-  return (
-    <div style={styles.container}>
-      <h1>App Videochiamata 1:1 con Screen Sharing</h1>
+  // --- Fullscreen singolo video su doppio click ---
+  function toggleFullScreenVideo(videoRef) {
+    const videoElement = videoRef.current;
+    if (!videoElement) return;
 
-      {/* Stato della connessione */}
+    if (!document.fullscreenElement) {
+      videoElement.requestFullscreen().catch((err) => {
+        alert(`Errore nel fullscreen video: ${err.message}`);
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  }
+
+  // --- Ingrandisci solo un video (clic singolo) ---
+  function maximizeVideo(which) {
+    if (maximizedVideo === which) {
+      setMaximizedVideo(null);
+    } else {
+      setMaximizedVideo(which);
+    }
+  }
+
+  // --- UI ---
+  return (
+    <div style={styles.container} ref={containerRef}>
+      <h1>Videochiamata 1:1 con Screen Sharing e Fullscreen</h1>
+
       <div style={{ marginBottom: 10 }}>
         <strong>Status:</strong>{' '}
         {!isConnected && 'Non connesso al signaling server'}
@@ -310,39 +318,65 @@ export default function App() {
         {inCall && 'In chiamata'}
       </div>
 
-      <div style={styles.videosContainer}>
-        {/* Video locale */}
-        <div>
-          <h3>Video Locale</h3>
-          <video
-            ref={localVideoRef}
-            autoPlay
-            muted
-            playsInline
-            style={styles.video}
-          />
-        </div>
+      <div
+        style={{
+          ...styles.videosContainer,
+          flexDirection: maximizedVideo ? 'column' : 'row',
+        }}
+      >
+        {(maximizedVideo === null || maximizedVideo === 'local') && (
+          <div
+            style={{
+              ...styles.videoWrapper,
+              flex: maximizedVideo === 'local' ? 1 : '1 1 45%',
+            }}
+          >
+            <h3>Video Locale</h3>
+            <video
+              ref={localVideoRef}
+              autoPlay
+              muted
+              playsInline
+              style={{
+                ...styles.video,
+                cursor: 'pointer',
+                width: '100%',
+                height: maximizedVideo === 'local' ? '80vh' : 'auto',
+              }}
+              onClick={() => maximizeVideo('local')}
+              onDoubleClick={() => toggleFullScreenVideo(localVideoRef)}
+            />
+          </div>
+        )}
 
-        {/* Video remoto */}
-        <div>
-          <h3>Video Remoto</h3>
-          <video
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            style={styles.video}
-          />
-        </div>
+        {(maximizedVideo === null || maximizedVideo === 'remote') && (
+          <div
+            style={{
+              ...styles.videoWrapper,
+              flex: maximizedVideo === 'remote' ? 1 : '1 1 45%',
+            }}
+          >
+            <h3>Video Remoto</h3>
+            <video
+              ref={remoteVideoRef}
+              autoPlay
+              playsInline
+              style={{
+                ...styles.video,
+                cursor: 'pointer',
+                width: '100%',
+                height: maximizedVideo === 'remote' ? '80vh' : 'auto',
+              }}
+              onClick={() => maximizeVideo('remote')}
+              onDoubleClick={() => toggleFullScreenVideo(remoteVideoRef)}
+            />
+          </div>
+        )}
       </div>
 
-      {/* Pulsanti chiamata e controllo */}
       <div style={styles.buttonsContainer}>
         {!inCall && (
-          <button
-            onClick={startCall}
-            disabled={!isConnected}
-            style={styles.button}
-          >
+          <button onClick={startCall} disabled={!isConnected} style={styles.button}>
             Avvia Chiamata
           </button>
         )}
@@ -361,12 +395,19 @@ export default function App() {
               {videoEnabled ? 'Disattiva Video' : 'Attiva Video'}
             </button>
 
-            <button
-              onClick={toggleScreenShare}
-              style={styles.button}
-            >
+            <button onClick={toggleScreenShare} style={styles.button}>
               {isScreenSharing ? 'Ferma Condivisione Schermo' : 'Condividi Schermo'}
             </button>
+
+            <button onClick={toggleFullScreen} style={styles.button}>
+              {document.fullscreenElement ? 'Esci Fullscreen' : 'Fullscreen'}
+            </button>
+
+            {maximizedVideo && (
+              <button onClick={() => setMaximizedVideo(null)} style={styles.button}>
+                Esci Ingrandimento
+              </button>
+            )}
           </>
         )}
       </div>
@@ -374,11 +415,10 @@ export default function App() {
   );
 }
 
-// Stili semplici in JS
 const styles = {
   container: {
     fontFamily: 'Arial, sans-serif',
-    maxWidth: 800,
+    maxWidth: 900,
     margin: 'auto',
     padding: 20,
     textAlign: 'center',
@@ -387,11 +427,14 @@ const styles = {
     display: 'flex',
     justifyContent: 'space-around',
     marginBottom: 20,
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+  },
+  videoWrapper: {
+    marginBottom: 10,
   },
   video: {
-    width: 320,
-    height: 240,
+    maxHeight: 480,
     backgroundColor: '#000',
     borderRadius: 8,
   },
