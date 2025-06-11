@@ -9,6 +9,7 @@ export default function App() {
 
   const pcRef = useRef(null);
   const wsRef = useRef(null);
+  const pendingCandidatesRef = useRef([]);
 
   const [isConnected, setIsConnected] = useState(false);
   const [inCall, setInCall] = useState(false);
@@ -40,7 +41,7 @@ export default function App() {
           return;
         }
 
-        console.log('Messaggio WebSocket ricevuto:', data); // <-- LOG
+        console.log('Messaggio WebSocket ricevuto:', data);
 
         switch (data.type) {
           case 'offer':
@@ -51,11 +52,12 @@ export default function App() {
             break;
           case 'candidate':
             if (data.candidate && pcRef.current) {
-              if (pcRef.current.remoteDescription) {
+              if (pcRef.current.remoteDescription && pcRef.current.remoteDescription.type) {
                 await pcRef.current.addIceCandidate(data.candidate);
                 console.log('Ice candidate aggiunto:', data.candidate);
               } else {
-                console.warn('Remote description non settata, candidato scartato:', data.candidate);
+                console.log('Remote description non ancora settata, candidato salvato in pending');
+                pendingCandidatesRef.current.push(data.candidate);
               }
             }
             break;
@@ -113,7 +115,7 @@ export default function App() {
     };
 
     pc.ontrack = (event) => {
-      console.log('Evento ontrack ricevuto:', event); // <-- LOG
+      console.log('Evento ontrack ricevuto:', event);
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = event.streams[0];
       }
@@ -153,7 +155,7 @@ export default function App() {
 
   // --- Handle offer (chiamata in ingresso) ---
   async function handleOffer(offer) {
-    console.log('Ricevuto offer, setto remote description:', offer); // <-- LOG
+    console.log('Ricevuto offer, setto remote description:', offer);
 
     await createPeerConnection();
 
@@ -167,6 +169,17 @@ export default function App() {
       });
 
       await pcRef.current.setRemoteDescription(offer);
+
+      // Aggiungi i candidati pendenti
+      for (const candidate of pendingCandidatesRef.current) {
+        try {
+          await pcRef.current.addIceCandidate(candidate);
+        } catch (e) {
+          console.error('Errore aggiungendo candidato pendente:', e);
+        }
+      }
+      pendingCandidatesRef.current = [];
+
       const answer = await pcRef.current.createAnswer();
       await pcRef.current.setLocalDescription(answer);
 
@@ -184,9 +197,19 @@ export default function App() {
 
   // --- Handle answer ---
   async function handleAnswer(answer) {
-    console.log('Ricevuto answer, setto remote description:', answer); // <-- LOG
+    console.log('Ricevuto answer, setto remote description:', answer);
     if (pcRef.current) {
       await pcRef.current.setRemoteDescription(answer);
+
+      // Aggiungi i candidati pendenti
+      for (const candidate of pendingCandidatesRef.current) {
+        try {
+          await pcRef.current.addIceCandidate(candidate);
+        } catch (e) {
+          console.error('Errore aggiungendo candidato pendente:', e);
+        }
+      }
+      pendingCandidatesRef.current = [];
     }
   }
 
@@ -317,75 +340,14 @@ export default function App() {
 
   // --- UI ---
   return (
-    <div style={styles.container} ref={containerRef}>
-      <h1>Videochiamata 1:1 con Screen Sharing e Fullscreen</h1>
+    <div
+      ref={containerRef}
+      className={`container ${maximizedVideo === 'local' ? 'max-local' : ''} ${maximizedVideo === 'remote' ? 'max-remote' : ''}`}
+      style={{ width: '100vw', height: '100vh', backgroundColor: 'black', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}
+    >
+      <h1 style={{ color: 'white' }}>Video Chat</h1>
 
-      <div style={{ marginBottom: 10 }}>
-        <strong>Status:</strong>{' '}
-        {!isConnected && 'Non connesso al signaling server'}
-        {isConnected && !inCall && 'Connesso, pronto per chiamare'}
-        {inCall && 'In chiamata'}
-      </div>
-
-      <div
-        style={{
-          ...styles.videosContainer,
-          flexDirection: maximizedVideo ? 'column' : 'row',
-        }}
-      >
-        {(maximizedVideo === null || maximizedVideo === 'local') && (
-          <div
-            style={{
-              ...styles.videoWrapper,
-              flex: maximizedVideo === 'local' ? 1 : 0.5,
-            }}
-            onClick={() => maximizeVideo('local')}
-            onDoubleClick={() => toggleFullScreenVideo(localVideoRef)}
-          >
-            <video
-              ref={localVideoRef}
-              autoPlay
-              muted
-              playsInline
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'cover',
-                borderRadius: 8,
-                backgroundColor: 'black',
-              }}
-            />
-            <div style={styles.label}>Local Video</div>
-          </div>
-        )}
-
-        {(maximizedVideo === null || maximizedVideo === 'remote') && (
-          <div
-            style={{
-              ...styles.videoWrapper,
-              flex: maximizedVideo === 'remote' ? 1 : 0.5,
-            }}
-            onClick={() => maximizeVideo('remote')}
-            onDoubleClick={() => toggleFullScreenVideo(remoteVideoRef)}
-          >
-            <video
-              ref={remoteVideoRef}
-              autoPlay
-              playsInline
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'cover',
-                borderRadius: 8,
-                backgroundColor: 'black',
-              }}
-            />
-            <div style={styles.label}>Remote Video</div>
-          </div>
-        )}
-      </div>
-
-      <div style={styles.buttonsContainer}>
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginBottom: 10 }}>
         {!inCall && (
           <button onClick={startCall} disabled={!isConnected}>
             Avvia chiamata
@@ -393,59 +355,47 @@ export default function App() {
         )}
         {inCall && (
           <>
-            <button onClick={toggleAudio}>
-              {audioEnabled ? 'Disattiva Microfono' : 'Attiva Microfono'}
-            </button>
-            <button onClick={toggleVideo}>
-              {videoEnabled ? 'Disattiva Video' : 'Attiva Video'}
-            </button>
-            <button onClick={toggleScreenShare}>
-              {isScreenSharing ? 'Termina Condivisione Schermo' : 'Condividi Schermo'}
-            </button>
             <button onClick={endCall}>Termina chiamata</button>
+            <button onClick={toggleAudio}>{audioEnabled ? 'Disattiva microfono' : 'Attiva microfono'}</button>
+            <button onClick={toggleVideo}>{videoEnabled ? 'Disattiva video' : 'Attiva video'}</button>
+            <button onClick={toggleScreenShare}>{isScreenSharing ? 'Ferma condivisione schermo' : 'Condividi schermo'}</button>
           </>
         )}
-        <button onClick={toggleFullScreen}>Fullscreen container</button>
+        <button onClick={toggleFullScreen}>Fullscreen finestra</button>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <video
+          ref={localVideoRef}
+          autoPlay
+          muted
+          playsInline
+          onClick={() => maximizeVideo('local')}
+          onDoubleClick={() => toggleFullScreenVideo(localVideoRef)}
+          style={{
+            width: maximizedVideo === 'local' ? '80vw' : '300px',
+            height: maximizedVideo === 'local' ? '80vh' : '225px',
+            backgroundColor: 'black',
+            cursor: 'pointer',
+            border: '2px solid white',
+          }}
+        />
+
+        <video
+          ref={remoteVideoRef}
+          autoPlay
+          playsInline
+          onClick={() => maximizeVideo('remote')}
+          onDoubleClick={() => toggleFullScreenVideo(remoteVideoRef)}
+          style={{
+            width: maximizedVideo === 'remote' ? '80vw' : '300px',
+            height: maximizedVideo === 'remote' ? '80vh' : '225px',
+            backgroundColor: 'black',
+            cursor: 'pointer',
+            border: '2px solid white',
+          }}
+        />
       </div>
     </div>
   );
 }
-
-const styles = {
-  container: {
-    padding: 10,
-    fontFamily: 'Arial, sans-serif',
-    maxWidth: 900,
-    margin: 'auto',
-    userSelect: 'none',
-  },
-  videosContainer: {
-    display: 'flex',
-    gap: 10,
-    marginBottom: 10,
-    height: 360,
-  },
-  videoWrapper: {
-    position: 'relative',
-    backgroundColor: '#000',
-    borderRadius: 8,
-    cursor: 'pointer',
-    overflow: 'hidden',
-  },
-  label: {
-    position: 'absolute',
-    bottom: 5,
-    left: 5,
-    color: '#fff',
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    padding: '2px 6px',
-    borderRadius: 4,
-    fontSize: 12,
-    userSelect: 'none',
-  },
-  buttonsContainer: {
-    display: 'flex',
-    gap: 10,
-    flexWrap: 'wrap',
-  },
-};
