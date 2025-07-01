@@ -6,11 +6,10 @@ export default function App() {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const containerRef = useRef(null);
+  const remoteSmallRef = useRef(null);
 
   const pcRef = useRef(null);
   const wsRef = useRef(null);
-
-  // Per accodare candidati ICE ricevuti prima di setRemoteDescription
   const pendingCandidatesRef = useRef([]);
 
   const [isConnected, setIsConnected] = useState(false);
@@ -19,8 +18,13 @@ export default function App() {
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [maximizedVideo, setMaximizedVideo] = useState(null); // 'local' | 'remote' | null
+  const [isFullScreen, setIsFullScreen] = useState(false);
 
-  // --- WebSocket e gestione signaling ---
+  // Posizione finestrella remota draggable
+  const [remotePos, setRemotePos] = useState({ x: 20, y: 20 });
+  const draggingRef = useRef(false);
+  const dragOffset = useRef({ x: 0, y: 0 });
+
   useEffect(() => {
     wsRef.current = new WebSocket(SIGNALING_SERVER_URL);
 
@@ -35,15 +39,9 @@ export default function App() {
 
         if (typeof message.data === 'string') {
           data = JSON.parse(message.data);
-        } else if (message.data instanceof Blob) {
-          console.warn('Ricevuto Blob via WebSocket, non è JSON:', message.data);
-          return;
         } else {
-          console.warn('Tipo di dato non previsto:', typeof message.data);
           return;
         }
-
-        console.log('Messaggio WebSocket ricevuto:', data);
 
         switch (data.type) {
           case 'offer':
@@ -56,10 +54,7 @@ export default function App() {
             if (data.candidate && pcRef.current) {
               if (pcRef.current.remoteDescription && pcRef.current.remoteDescription.type) {
                 await pcRef.current.addIceCandidate(data.candidate);
-                console.log('Ice candidate aggiunto:', data.candidate);
               } else {
-                // Accoda candidato finché non c'è remote description
-                console.log('Accodato candidato ICE in attesa di remote description:', data.candidate);
                 pendingCandidatesRef.current.push(data.candidate);
               }
             }
@@ -70,8 +65,6 @@ export default function App() {
           case 'error':
             alert(`Errore server: ${data.message}`);
             break;
-          default:
-            console.warn('Unknown message type:', data.type);
         }
       } catch (e) {
         console.error('Error handling message', e);
@@ -83,7 +76,6 @@ export default function App() {
     };
 
     wsRef.current.onclose = () => {
-      console.log('WebSocket closed');
       setIsConnected(false);
       if (inCall) endCall();
     };
@@ -95,7 +87,6 @@ export default function App() {
     };
   }, []);
 
-  // --- Helper: stop local media tracks ---
   function stopLocalStream() {
     if (localVideoRef.current?.srcObject) {
       localVideoRef.current.srcObject.getTracks().forEach((track) => track.stop());
@@ -103,39 +94,36 @@ export default function App() {
     }
   }
 
-  // --- Crea Peer Connection e gestisce eventi ---
   async function createPeerConnection() {
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
     });
 
     pc.onicecandidate = (event) => {
-      if (event.candidate && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(
-          JSON.stringify({ type: 'candidate', candidate: event.candidate })
-        );
+      if (event.candidate && wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
       }
     };
 
     pc.ontrack = (event) => {
-      console.log('Evento ontrack ricevuto:', event);
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = event.streams[0];
+      }
+      if (remoteSmallRef.current) {
+        // stessa sorgente per finestrella remota (utile in fullscreen)
+        remoteSmallRef.current.srcObject = event.streams[0];
       }
     };
 
     pcRef.current = pc;
   }
 
-  // --- Start chiamata ---
   async function startCall() {
     await createPeerConnection();
 
     try {
       const localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = localStream;
-      }
+      if (localVideoRef.current) localVideoRef.current.srcObject = localStream;
 
       localStream.getTracks().forEach((track) => {
         pcRef.current.addTrack(track, localStream);
@@ -156,27 +144,21 @@ export default function App() {
     }
   }
 
-  // --- Handle offer (chiamata in ingresso) ---
   async function handleOffer(offer) {
-    console.log('Ricevuto offer, setto remote description:', offer);
-
     await createPeerConnection();
 
     try {
       const localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = localStream;
-      }
+      if (localVideoRef.current) localVideoRef.current.srcObject = localStream;
+
       localStream.getTracks().forEach((track) => {
         pcRef.current.addTrack(track, localStream);
       });
 
       await pcRef.current.setRemoteDescription(offer);
 
-      // Dopo setRemoteDescription aggiungiamo candidati pendenti
       for (const candidate of pendingCandidatesRef.current) {
         await pcRef.current.addIceCandidate(candidate);
-        console.log('Ice candidate pendente aggiunto:', candidate);
       }
       pendingCandidatesRef.current = [];
 
@@ -195,269 +177,370 @@ export default function App() {
     }
   }
 
-  // --- Handle answer ---
   async function handleAnswer(answer) {
-    console.log('Ricevuto answer, setto remote description:', answer);
     if (pcRef.current) {
       await pcRef.current.setRemoteDescription(answer);
 
-      // Anche qui aggiungiamo eventuali candidati pendenti (nel caso raro)
       for (const candidate of pendingCandidatesRef.current) {
         await pcRef.current.addIceCandidate(candidate);
-        console.log('Ice candidate pendente aggiunto dopo answer:', candidate);
       }
       pendingCandidatesRef.current = [];
     }
   }
 
-  // --- Termina chiamata ---
   function endCall() {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'hangup' }));
     }
 
-    if (pcRef.current) {
-      pcRef.current.close();
-      pcRef.current = null;
-    }
+    pcRef.current?.close();
+    pcRef.current = null;
     stopLocalStream();
 
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = null;
-    }
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+    if (remoteSmallRef.current) remoteSmallRef.current.srcObject = null;
 
     setInCall(false);
     setIsScreenSharing(false);
     setMaximizedVideo(null);
+    setIsFullScreen(false);
     pendingCandidatesRef.current = [];
   }
 
-  // --- Toggle Microfono ---
   function toggleAudio() {
     if (!localVideoRef.current?.srcObject) return;
-
     const audioTracks = localVideoRef.current.srcObject.getAudioTracks();
     if (audioTracks.length === 0) return;
-
     audioTracks[0].enabled = !audioTracks[0].enabled;
     setAudioEnabled(audioTracks[0].enabled);
   }
 
-  // --- Toggle Video ---
   function toggleVideo() {
     if (!localVideoRef.current?.srcObject) return;
-
     const videoTracks = localVideoRef.current.srcObject.getVideoTracks();
     if (videoTracks.length === 0) return;
-
     videoTracks[0].enabled = !videoTracks[0].enabled;
     setVideoEnabled(videoTracks[0].enabled);
   }
 
-  // --- Toggle Condivisione Schermo ---
-async function toggleScreenShare() {
-  if (isScreenSharing) {
-    stopScreenShare();
-    return;
-  }
-
-  try {
-    // Acquisizione schermo con *eventuale* audio del sistema
-    const screenStream = await navigator.mediaDevices.getDisplayMedia({
-      video: true,
-      audio: true  // ← importante!
-    });
-
-    // Acquisizione microfono
-    const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-    // Combina audio del sistema (se disponibile) + microfono
-    const combinedStream = new MediaStream();
-
-    // Aggiungi video dallo schermo
-    screenStream.getVideoTracks().forEach((track) => {
-      combinedStream.addTrack(track);
-    });
-
-    // Aggiungi tracce audio: prima microfono, poi (opzionale) audio di sistema
-    micStream.getAudioTracks().forEach((track) => {
-      combinedStream.addTrack(track);
-    });
-
-    screenStream.getAudioTracks().forEach((track) => {
-      combinedStream.addTrack(track);
-    });
-
-    // Sostituisci tracce nel peer connection
-    const videoSender = pcRef.current.getSenders().find((s) => s.track?.kind === 'video');
-    const audioSender = pcRef.current.getSenders().find((s) => s.track?.kind === 'audio');
-
-    if (videoSender) {
-      await videoSender.replaceTrack(combinedStream.getVideoTracks()[0]);
-    }
-
-    if (audioSender && combinedStream.getAudioTracks().length > 0) {
-      await audioSender.replaceTrack(combinedStream.getAudioTracks()[0]);
-    }
-
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = combinedStream;
-    }
-
-    // Ferma la condivisione se l’utente chiude manualmente
-    screenStream.getVideoTracks()[0].onended = () => {
+  async function toggleScreenShare() {
+    if (isScreenSharing) {
       stopScreenShare();
-    };
+      return;
+    }
 
-    setIsScreenSharing(true);
-    setVideoEnabled(true);
-  } catch (err) {
-    alert('Errore nella condivisione schermo: ' + err.message);
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      const combinedStream = new MediaStream();
+
+      screenStream.getVideoTracks().forEach((track) => combinedStream.addTrack(track));
+      micStream.getAudioTracks().forEach((track) => combinedStream.addTrack(track));
+      screenStream.getAudioTracks().forEach((track) => combinedStream.addTrack(track));
+
+      const videoSender = pcRef.current.getSenders().find((s) => s.track?.kind === 'video');
+      const audioSender = pcRef.current.getSenders().find((s) => s.track?.kind === 'audio');
+
+      if (videoSender) await videoSender.replaceTrack(combinedStream.getVideoTracks()[0]);
+      if (audioSender && combinedStream.getAudioTracks().length > 0)
+        await audioSender.replaceTrack(combinedStream.getAudioTracks()[0]);
+
+      if (localVideoRef.current) localVideoRef.current.srcObject = combinedStream;
+
+      screenStream.getVideoTracks()[0].onended = () => stopScreenShare();
+
+      setIsScreenSharing(true);
+      setVideoEnabled(true);
+    } catch (err) {
+      alert('Errore nella condivisione schermo: ' + err.message);
+    }
   }
-}
-
 
   function stopScreenShare() {
     if (!isScreenSharing) return;
 
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(async (stream) => {
-      const videoTrack = stream.getVideoTracks()[0];
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      .then(async (stream) => {
+        const videoTrack = stream.getVideoTracks()[0];
+        const sender = pcRef.current.getSenders().find((s) => s.track.kind === 'video');
+        if (sender) await sender.replaceTrack(videoTrack);
 
-      const sender = pcRef.current.getSenders().find((s) => s.track.kind === 'video');
-      if (sender) {
-        await sender.replaceTrack(videoTrack);
-      }
+        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
-
-      setIsScreenSharing(false);
-    }).catch((err) => {
-      alert('Errore nel ripristino webcam: ' + err.message);
-    });
-  }
-
-  // --- Fullscreen container ---
-  function toggleFullScreen() {
-    if (!document.fullscreenElement && containerRef.current) {
-      containerRef.current.requestFullscreen().catch((err) => {
-        alert(`Errore nel fullscreen: ${err.message}`);
+        setIsScreenSharing(false);
+      })
+      .catch((err) => {
+        alert('Errore nel ripristino webcam: ' + err.message);
       });
-    } else {
-      document.exitFullscreen().catch(() => {});
-    }
   }
 
-  // --- Fullscreen singolo video su doppio click ---
-  function toggleFullScreenVideo(videoRef) {
-    const videoElement = videoRef.current;
-    if (!videoElement) return;
-
+  // Fullscreen a tutto schermo container o video local/remote
+  async function toggleFullScreen() {
     if (!document.fullscreenElement) {
-      videoElement.requestFullscreen().catch((err) => {
-        alert(`Errore nel fullscreen video: ${err.message}`);
-      });
+      if (containerRef.current) {
+        await containerRef.current.requestFullscreen();
+        setIsFullScreen(true);
+      }
     } else {
-      document.exitFullscreen().catch(() => {});
+      await document.exitFullscreen();
+      setIsFullScreen(false);
     }
   }
 
-  // --- Ingrandisci solo un video (clic singolo) ---
-  function maximizeVideo(which) {
-    setMaximizedVideo(maximizedVideo === which ? null : which);
+  // Drag & drop finestrella remota
+  function onMouseDown(e) {
+    draggingRef.current = true;
+    dragOffset.current = {
+      x: e.clientX - remotePos.x,
+      y: e.clientY - remotePos.y,
+    };
   }
 
-  // --- UI ---
-  return (
-    <div style={styles.container} ref={containerRef}>
-      <h1>Videochiamata 1:1 con Screen Sharing e Fullscreen</h1>
+  function onMouseMove(e) {
+    if (!draggingRef.current) return;
+    let newX = e.clientX - dragOffset.current.x;
+    let newY = e.clientY - dragOffset.current.y;
 
-      <div style={{ marginBottom: 10 }}>
-        <strong>Status:</strong>{' '}
-        {!isConnected && 'Non connesso al signaling server'}
-        {isConnected && !inCall && 'Connesso, pronto per chiamare'}
-        {inCall && 'In chiamata'}
-      </div>
+    // Limiti base (non uscire dallo schermo)
+    if (newX < 0) newX = 0;
+    if (newY < 0) newY = 0;
+    if (newX > window.innerWidth - 200) newX = window.innerWidth - 200;
+    if (newY > window.innerHeight - 150) newY = window.innerHeight - 150;
+
+    setRemotePos({ x: newX, y: newY });
+  }
+
+  function onMouseUp() {
+    draggingRef.current = false;
+  }
+
+  // Al click su video ingrandisce/schermo intero o resetta
+  function onVideoClick(videoType) {
+    if (maximizedVideo === videoType) {
+      setMaximizedVideo(null);
+    } else {
+      setMaximizedVideo(videoType);
+    }
+  }
+
+  return (
+    <>
+      <style>{`
+        * {
+          box-sizing: border-box;
+        }
+        body, html, #root {
+          margin: 0; padding: 0; height: 100%;
+          background: #1c1c2e;
+          color: #ddd;
+          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+          user-select: none;
+          overflow: hidden;
+        }
+        .app-container {
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+          border-top: 6px solid linear-gradient(90deg, #7a0bc0, #b54fe1);
+          background: linear-gradient(135deg, #2a2450, #1c1c2e);
+          padding: 12px;
+        }
+        header {
+          font-size: 1.5rem;
+          font-weight: 700;
+          text-align: center;
+          margin-bottom: 8px;
+          letter-spacing: 0.1em;
+          color: #b54fe1;
+          text-shadow: 0 0 8px #a057d5;
+        }
+        .status {
+          text-align: center;
+          margin-bottom: 10px;
+          font-weight: 600;
+          color: #8e7cc3;
+        }
+        .videos-container {
+          flex-grow: 1;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          position: relative;
+          gap: 10px;
+          background: #222040;
+          border-radius: 12px;
+          padding: 8px;
+          overflow: hidden;
+        }
+        video {
+          border-radius: 12px;
+          background: black;
+          cursor: pointer;
+          object-fit: cover;
+          transition: box-shadow 0.3s ease;
+          box-shadow: 0 0 4px #5533aa;
+          max-height: 300px;
+          max-width: 45vw;
+          user-select: none;
+        }
+        video:hover {
+          box-shadow: 0 0 16px #b54fe1;
+        }
+        .video-maximized {
+          max-width: 95vw !important;
+          max-height: 95vh !important;
+          box-shadow: 0 0 40px #b54fe1;
+          border: 3px solid #b54fe1;
+          cursor: zoom-out;
+        }
+        .local-video {
+          border: 2px solid #5e3aae;
+        }
+        .remote-video {
+          border: 2px solid #b54fe1;
+        }
+        .remote-small-window {
+          position: fixed;
+          width: 180px;
+          height: 135px;
+          border: 2px solid #b54fe1;
+          border-radius: 12px;
+          overflow: hidden;
+          background: #2a2450;
+          box-shadow: 0 0 12px #b54fe1;
+          cursor: grab;
+          z-index: 9999;
+          user-select: none;
+          top: ${remotePos.y}px;
+          left: ${remotePos.x}px;
+        }
+        .controls {
+          display: flex;
+          justify-content: center;
+          margin-top: 12px;
+          gap: 12px;
+        }
+        button {
+          border: none;
+          background: #5e3aae;
+          color: white;
+          padding: 12px;
+          border-radius: 50%;
+          font-size: 1.2rem;
+          width: 56px;
+          height: 56px;
+          box-shadow: 0 0 12px #7a0bc0;
+          cursor: pointer;
+          transition: background-color 0.3s ease, transform 0.2s ease;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+        }
+        button:hover {
+          background: #b54fe1;
+          transform: scale(1.1);
+          box-shadow: 0 0 20px #d48eff;
+        }
+        button:active {
+          transform: scale(0.95);
+        }
+        button.disabled {
+          background: #44415a;
+          cursor: not-allowed;
+          box-shadow: none;
+        }
+        footer {
+          margin-top: 14px;
+          text-align: center;
+          font-size: 0.9rem;
+          color: #7b70a7;
+        }
+      `}</style>
 
       <div
-        style={{
-          display: 'flex',
-          justifyContent: 'center',
-          gap: 10,
-          flexWrap: 'wrap',
-        }}
+        className="app-container"
+        ref={containerRef}
+        onMouseMove={onMouseMove}
+        onMouseUp={onMouseUp}
+        onMouseLeave={onMouseUp}
       >
-        <video
-          ref={localVideoRef}
-          autoPlay
-          muted
-          playsInline
-          style={{
-            ...styles.video,
-            border: maximizedVideo === 'local' ? '4px solid #4caf50' : '2px solid #ccc',
-            flexGrow: maximizedVideo === 'local' ? 1 : 0,
-            width: maximizedVideo === 'local' ? '80vw' : 160,
-            height: maximizedVideo === 'local' ? '60vh' : 120,
-            cursor: 'pointer',
-          }}
-          onClick={() => maximizeVideo('local')}
-          onDoubleClick={() => toggleFullScreenVideo(localVideoRef)}
-          title="Tuo video (clic singolo per ingrandire, doppio per fullscreen)"
-        />
+        <header>Video Chat React - Fullscreen & Sharing</header>
 
-        <video
-          ref={remoteVideoRef}
-          autoPlay
-          playsInline
-          style={{
-            ...styles.video,
-            border: maximizedVideo === 'remote' ? '4px solid #2196f3' : '2px solid #ccc',
-            flexGrow: maximizedVideo === 'remote' ? 1 : 0,
-            width: maximizedVideo === 'remote' ? '80vw' : 160,
-            height: maximizedVideo === 'remote' ? '60vh' : 120,
-            cursor: 'pointer',
-          }}
-          onClick={() => maximizeVideo('remote')}
-          onDoubleClick={() => toggleFullScreenVideo(remoteVideoRef)}
-          title="Video interlocutore (clic singolo per ingrandire, doppio per fullscreen)"
-        />
-      </div>
+        <div className="status">
+          Stato WebSocket: {isConnected ? 'Connesso' : 'Disconnesso'} — Chiamata: {inCall ? 'Attiva' : 'Nessuna'}
+        </div>
 
-      <div style={{ marginTop: 15, display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
-        {!inCall && (
-          <button onClick={startCall} disabled={!isConnected}>
-            Avvia Chiamata
-          </button>
-        )}
-        {inCall && (
-          <>
-            <button onClick={endCall}>Termina Chiamata</button>
-            <button onClick={toggleAudio}>
-              {audioEnabled ? 'Disattiva Microfono' : 'Attiva Microfono'}
-            </button>
-            <button onClick={toggleVideo}>
-              {videoEnabled ? 'Disattiva Video' : 'Attiva Video'}
-            </button>
-            <button onClick={toggleScreenShare}>
-              {isScreenSharing ? 'Interrompi Condivisione Schermo' : 'Condividi Schermo'}
-            </button>
-            <button onClick={toggleFullScreen}>Fullscreen Container</button>
-          </>
-        )}
+        <div className="videos-container" style={{ cursor: isFullScreen ? 'default' : 'pointer' }}>
+          {/* Local video */}
+          <video
+            ref={localVideoRef}
+            autoPlay
+            muted
+            playsInline
+            className={`local-video ${
+              maximizedVideo === 'local' ? 'video-maximized' : ''
+            }`}
+            onClick={() => onVideoClick('local')}
+          />
+
+          {/* Remote video */}
+          <video
+            ref={remoteVideoRef}
+            autoPlay
+            playsInline
+            className={`remote-video ${
+              maximizedVideo === 'remote' ? 'video-maximized' : ''
+            }`}
+            onClick={() => onVideoClick('remote')}
+          />
+
+          {/* Finestrella remota mobile solo se fullscreen e condivisione schermo */}
+          {isFullScreen && isScreenSharing && inCall && (
+            <div
+              className="remote-small-window"
+              style={{ top: remotePos.y, left: remotePos.x }}
+              onMouseDown={onMouseDown}
+            >
+              <video
+                ref={remoteSmallRef}
+                autoPlay
+                muted
+                playsInline
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="controls">
+          {!inCall ? (
+            <button onClick={startCall} title="Avvia chiamata">▶️</button>
+          ) : (
+            <>
+              <button onClick={toggleAudio} title={audioEnabled ? 'Disattiva microfono' : 'Attiva microfono'}>
+                {audioEnabled ? '🎤' : '🔇'}
+              </button>
+              <button onClick={toggleVideo} title={videoEnabled ? 'Disattiva videocamera' : 'Attiva videocamera'}>
+                {videoEnabled ? '📷' : '🚫'}
+              </button>
+              <button onClick={toggleScreenShare} title={isScreenSharing ? 'Ferma condivisione schermo' : 'Condividi schermo'}>
+                {isScreenSharing ? '🛑' : '🖥️'}
+              </button>
+              <button onClick={toggleFullScreen} title={isFullScreen ? 'Esci da fullscreen' : 'Fullscreen'}>
+                {isFullScreen ? '🡼' : '🡾'}
+              </button>
+              <button onClick={endCall} title="Termina chiamata" style={{ background: '#c0392b' }}>
+                ❌
+              </button>
+            </>
+          )}
+        </div>
+
+        <footer>
+          Realizzato con React & WebRTC — <small>Drag finestra webcam remota in fullscreen</small>
+        </footer>
       </div>
-    </div>
+    </>
   );
 }
-
-const styles = {
-  container: {
-    textAlign: 'center',
-    padding: 10,
-  },
-  video: {
-    backgroundColor: '#000',
-    borderRadius: 8,
-    objectFit: 'cover',
-  },
-};
