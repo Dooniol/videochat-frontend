@@ -349,19 +349,11 @@ export default function App() {
   }
 
   /**
-   * Gestisce il “focus” (pseudo‑fullscreen in‑page) di uno dei video.
-   * Non usa la Fullscreen API, ma una classe CSS che espande il video
-   * a coprire tutto .videos-container.
-   *
+   * Gestisce il “fullscreen” in-page (massimizza il container video selezionato).
    * @param {'local'|'remote'} type
    */
   function onVideoClick(type) {
-    // Se riclicchi sullo stesso video, torni alla vista normale
-    if (maximizedVideo === type) {
-      setMaximizedVideo(null);
-    } else {
-      setMaximizedVideo(type);
-    }
+    setMaximizedVideo((prev) => (prev === type ? null : type));
   }
 
   return (
@@ -401,18 +393,27 @@ export default function App() {
             font-weight: 600;
             color: #8e7cc3;
           }
-          .videos-container {
-            flex-grow: 1;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            position: relative;
-            gap: 10px;
-            background: #222040;
-            border-radius: 12px;
-            padding: 8px;
-            overflow: hidden;
-          }
+.videos-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+}
+  .video-wrapper {
+  position: relative;
+  flex: 1 1 auto;
+  max-width: 48%;
+  max-height: 48%;
+  overflow: hidden;
+  border-radius: 12px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+  transition: all 0.3s ease;
+  cursor: zoom-in;
+}
           video {
             border-radius: 12px;
             background: black;
@@ -428,15 +429,18 @@ export default function App() {
             box-shadow: 0 0 16px #b54fe1;
           }
           .video-maximized {
-            position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    width: 100% !important;
-    height: 100% !important;
-    z-index: 20 !important;
-    box-shadow: 0 0 40px #b54fe1 !important;
-    border: 3px solid #b54fe1 !important;
-    cursor: zoom-out !important;
+  position: absolute !important;
+  top: 0;
+  left: 0;
+  width: 100% !important;
+  height: 100% !important;
+  z-index: 10;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  border: 3px solid #9c4dcc;
+  background-color: black;
+  cursor: zoom-out;
+}
           }
           .local-video {
             border: 2px solid #5e3aae;
@@ -520,28 +524,23 @@ export default function App() {
           className="videos-container"
           style={{ cursor: isFullScreen ? "default" : "pointer" }}
         >
-          {/* Local video */}
-          <video
-            ref={localVideoRef}
-            autoPlay
-            muted
-            playsInline
-            className={`local-video ${
+          <div
+            className={`video-wrapper ${
               maximizedVideo === "local" ? "video-maximized" : ""
             }`}
             onClick={() => onVideoClick("local")}
-          />
+          >
+            <video ref={localVideoRef} autoPlay muted playsInline />
+          </div>
 
-          {/* Remote video */}
-          <video
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            className={`remote-video ${
+          <div
+            className={`video-wrapper ${
               maximizedVideo === "remote" ? "video-maximized" : ""
             }`}
             onClick={() => onVideoClick("remote")}
-          />
+          >
+            <video ref={remoteVideoRef} autoPlay playsInline />
+          </div>
 
           {/* Finestrella remota mobile solo se fullscreen e condivisione schermo */}
           {isFullScreen && isScreenSharing && inCall && (
