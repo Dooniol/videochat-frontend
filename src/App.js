@@ -19,6 +19,9 @@ export default function App() {
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [maximizedVideo, setMaximizedVideo] = useState(null); // 'local' | 'remote' | null
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [mainStreamType, setMainStreamType] =
+    (useState < "screen") | ("camera" > "camera");
+  const [pipPosition, setPipPosition] = useState({ top: 20, left: 20 });
 
   // Posizione finestrella remota draggable
   const [remotePos, setRemotePos] = useState({ x: 20, y: 20 });
@@ -220,6 +223,31 @@ export default function App() {
     pendingCandidatesRef.current = [];
   }
 
+  function toggleMainStream() {
+    setMainStreamType((prev) => (prev === "camera" ? "screen" : "camera"));
+  }
+
+  function handleDrag(e) {
+    const pip = e.currentTarget;
+    let shiftX = e.clientX - pip.getBoundingClientRect().left;
+    let shiftY = e.clientY - pip.getBoundingClientRect().top;
+
+    function moveAt(pageX, pageY) {
+      setPipPosition({ top: pageY - shiftY, left: pageX - shiftX });
+    }
+
+    function onMouseMove(e) {
+      moveAt(e.pageX, e.pageY);
+    }
+
+    document.addEventListener("mousemove", onMouseMove);
+
+    pip.onmouseup = function () {
+      document.removeEventListener("mousemove", onMouseMove);
+      pip.onmouseup = null;
+    };
+  }
+
   function toggleAudio() {
     if (!localVideoRef.current?.srcObject) return;
     const audioTracks = localVideoRef.current.srcObject.getAudioTracks();
@@ -393,15 +421,12 @@ export default function App() {
             font-weight: 600;
             color: #8e7cc3;
           }
-.videos-container {
+          .videos-container {
   position: relative;
   width: 100%;
   height: 100%;
-  display: flex;
-  gap: 10px;
-  justify-content: center;
-  align-items: center;
-  flex-wrap: wrap;
+  background: black;
+  overflow: hidden;
 }
   .video-wrapper {
   position: relative;
@@ -413,6 +438,23 @@ export default function App() {
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
   transition: all 0.3s ease;
   cursor: zoom-in;
+}
+  .video-pip {
+  position: absolute;
+  width: 200px;
+  height: 150px;
+  border: 2px solid #9c4dcc;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: move;
+  z-index: 100;
+  background: black;
+}
+
+.video-pip video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
           video {
             border-radius: 12px;
@@ -445,6 +487,16 @@ export default function App() {
           .local-video {
             border: 2px solid #5e3aae;
           }
+            .video-main {
+  width: 100%;
+  height: 100%;
+  background: black;
+}
+  .video-main video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
           .remote-video {
             border: 2px solid #b54fe1;
           }
@@ -507,114 +559,120 @@ export default function App() {
         `}</style>
 
       <div
-        className="app-container"
-        ref={containerRef}
-        onMouseMove={onMouseMove}
-        onMouseUp={onMouseUp}
-        onMouseLeave={onMouseUp}
-      >
-        <header>Video Chat React - Fullscreen & Sharing</header>
+  className="app-container"
+  ref={containerRef}
+  onMouseMove={onMouseMove}
+  onMouseUp={onMouseUp}
+  onMouseLeave={onMouseUp}
+>
+  <header>Video Chat React - Fullscreen & Sharing</header>
 
-        <div className="status">
-          Stato WebSocket: {isConnected ? "Connesso" : "Disconnesso"} —
-          Chiamata: {inCall ? "Attiva" : "Nessuna"}
+  <div className="status">
+    Stato WebSocket: {isConnected ? "Connesso" : "Disconnesso"} — Chiamata: {inCall ? "Attiva" : "Nessuna"}
+  </div>
+
+  <div className="videos-container">
+    {mainStreamType === 'camera' ? (
+      <>
+        {/* Camera in grande */}
+        <div className="video-main">
+          <video ref={localVideoRef} autoPlay muted playsInline />
         </div>
 
+        {/* Screen share in piccolo (se attivo) */}
+        {isScreenSharing && (
+          <div
+            className="video-pip"
+            style={{ top: pipPosition.top, left: pipPosition.left }}
+            onMouseDown={handleDrag}
+            onClick={toggleMainStream}
+          >
+            <video ref={screenVideoRef} autoPlay muted playsInline />
+          </div>
+        )}
+      </>
+    ) : (
+      <>
+        {/* Screen share in grande */}
+        <div className="video-main">
+          <video ref={screenVideoRef} autoPlay muted playsInline />
+        </div>
+
+        {/* Camera in piccolo */}
         <div
-          className="videos-container"
-          style={{ cursor: isFullScreen ? "default" : "pointer" }}
+          className="video-pip"
+          style={{ top: pipPosition.top, left: pipPosition.left }}
+          onMouseDown={handleDrag}
+          onClick={toggleMainStream}
         >
-          <div
-            className={`video-wrapper ${
-              maximizedVideo === "local" ? "video-maximized" : ""
-            }`}
-            onClick={() => onVideoClick("local")}
-          >
-            <video ref={localVideoRef} autoPlay muted playsInline />
-          </div>
-
-          <div
-            className={`video-wrapper ${
-              maximizedVideo === "remote" ? "video-maximized" : ""
-            }`}
-            onClick={() => onVideoClick("remote")}
-          >
-            <video ref={remoteVideoRef} autoPlay playsInline />
-          </div>
-
-          {/* Finestrella remota mobile solo se fullscreen e condivisione schermo */}
-          {isFullScreen && isScreenSharing && inCall && (
-            <div
-              className="remote-small-window"
-              style={{ top: remotePos.y, left: remotePos.x }}
-              onMouseDown={onMouseDown}
-            >
-              <video
-                ref={remoteSmallRef}
-                autoPlay
-                muted
-                playsInline
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-              />
-            </div>
-          )}
+          <video ref={localVideoRef} autoPlay muted playsInline />
         </div>
+      </>
+    )}
+  </div>
 
-        <div className="controls">
-          {!inCall ? (
-            <button onClick={startCall} title="Avvia chiamata">
-              ▶️
-            </button>
-          ) : (
-            <>
-              <button
-                onClick={toggleAudio}
-                title={
-                  audioEnabled ? "Disattiva microfono" : "Attiva microfono"
-                }
-              >
-                {audioEnabled ? "🎤" : "🔇"}
-              </button>
-              <button
-                onClick={toggleVideo}
-                title={
-                  videoEnabled ? "Disattiva videocamera" : "Attiva videocamera"
-                }
-              >
-                {videoEnabled ? "📷" : "🚫"}
-              </button>
-              <button
-                onClick={toggleScreenShare}
-                title={
-                  isScreenSharing
-                    ? "Ferma condivisione schermo"
-                    : "Condividi schermo"
-                }
-              >
-                {isScreenSharing ? "🛑" : "🖥️"}
-              </button>
-              <button
-                onClick={toggleFullScreen}
-                title={isFullScreen ? "Esci da fullscreen" : "Fullscreen"}
-              >
-                {isFullScreen ? "🡼" : "🡾"}
-              </button>
-              <button
-                onClick={endCall}
-                title="Termina chiamata"
-                style={{ background: "#c0392b" }}
-              >
-                ❌
-              </button>
-            </>
-          )}
-        </div>
+  {/* Riquadro video remoto mobile (se applicabile) */}
+  {inCall && remoteVideoVisible && (
+    <div
+      className="remote-small-window"
+      style={{ top: remotePos.y, left: remotePos.x }}
+      onMouseDown={onMouseDown}
+    >
+      <video
+        ref={remoteSmallRef}
+        autoPlay
+        muted
+        playsInline
+        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+      />
+    </div>
+  )}
 
-        <footer>
-          Realizzato con React & WebRTC —{" "}
-          <small>Drag finestra webcam remota in fullscreen</small>
-        </footer>
-      </div>
+  <div className="controls">
+    {!inCall ? (
+      <button onClick={startCall} title="Avvia chiamata">
+        ▶️
+      </button>
+    ) : (
+      <>
+        <button
+          onClick={toggleAudio}
+          title={audioEnabled ? "Disattiva microfono" : "Attiva microfono"}
+        >
+          {audioEnabled ? "🎤" : "🔇"}
+        </button>
+        <button
+          onClick={toggleVideo}
+          title={videoEnabled ? "Disattiva videocamera" : "Attiva videocamera"}
+        >
+          {videoEnabled ? "📷" : "🚫"}
+        </button>
+        <button
+          onClick={toggleScreenShare}
+          title={isScreenSharing ? "Ferma condivisione schermo" : "Condividi schermo"}
+        >
+          {isScreenSharing ? "🛑" : "🖥️"}
+        </button>
+        <button
+          onClick={toggleMainStream}
+          title="Inverti visualizzazione"
+        >
+          🔁
+        </button>
+        <button
+          onClick={endCall}
+          title="Termina chiamata"
+          style={{ background: "#c0392b" }}
+        >
+          ❌
+        </button>
+      </>
+    )}
+  </div>
+
+  <footer>Realizzato con React & WebRTC</footer>
+</div>
+
     </>
   );
 }
