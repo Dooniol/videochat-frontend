@@ -387,48 +387,68 @@ export default function App() {
   return (
     <>
       <style>{`
-          * {
-            box-sizing: border-box;
-          }
-          body, html, #root {
-            margin: 0; padding: 0; height: 100%;
-            background: #1c1c2e;
-            color: #ddd;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            user-select: none;
-            overflow: hidden;
-          }
-          .app-container {
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            border-top: 6px solid linear-gradient(90deg, #7a0bc0, #b54fe1);
-            background: linear-gradient(135deg, #2a2450, #1c1c2e);
-            padding: 12px;
-          }
-          header {
-            font-size: 1.5rem;
-            font-weight: 700;
-            text-align: center;
-            margin-bottom: 8px;
-            letter-spacing: 0.1em;
-            color: #b54fe1;
-            text-shadow: 0 0 8px #a057d5;
-          }
-          .status {
-            text-align: center;
-            margin-bottom: 10px;
-            font-weight: 600;
-            color: #8e7cc3;
-          }
-          .videos-container {
+  * {
+  box-sizing: border-box;
+}
+
+body, html, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #1c1c2e;
+  color: #ddd;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  user-select: none;
+  overflow: hidden;
+}
+
+.app-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(135deg, #2a2450, #1c1c2e);
+  padding: 12px;
+  position: relative;
+}
+.app-container::before {
+  content: "";
+  height: 6px;
+  width: 100%;
+  background: linear-gradient(90deg, #7a0bc0, #b54fe1);
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+header {
+  font-size: 1.5rem;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 8px;
+  letter-spacing: 0.1em;
+  color: #b54fe1;
+  text-shadow: 0 0 8px #a057d5;
+}
+
+.status {
+  text-align: center;
+  margin-bottom: 10px;
+  font-weight: 600;
+  color: #8e7cc3;
+}
+
+.videos-container {
   position: relative;
   width: 100%;
   height: 100%;
-  background: black;
-  overflow: hidden;
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
 }
-  .video-wrapper {
+
+.video-wrapper {
   position: relative;
   flex: 1 1 auto;
   max-width: 48%;
@@ -439,38 +459,24 @@ export default function App() {
   transition: all 0.3s ease;
   cursor: zoom-in;
 }
-  .video-pip {
-  position: absolute;
-  width: 200px;
-  height: 150px;
-  border: 2px solid #9c4dcc;
-  border-radius: 8px;
-  overflow: hidden;
-  cursor: move;
-  z-index: 100;
+
+video {
+  border-radius: 12px;
   background: black;
+  cursor: pointer;
+  object-fit: cover;
+  transition: box-shadow 0.3s ease;
+  box-shadow: 0 0 4px #5533aa;
+  max-height: 300px;
+  max-width: 45vw;
+  user-select: none;
 }
 
-.video-pip video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+video:hover {
+  box-shadow: 0 0 16px #b54fe1;
 }
-          video {
-            border-radius: 12px;
-            background: black;
-            cursor: pointer;
-            object-fit: cover;
-            transition: box-shadow 0.3s ease;
-            box-shadow: 0 0 4px #5533aa;
-            max-height: 300px;
-            max-width: 45vw;
-            user-select: none;
-          }
-          video:hover {
-            box-shadow: 0 0 16px #b54fe1;
-          }
-          .video-maximized {
+
+.video-maximized {
   position: absolute !important;
   top: 0;
   left: 0;
@@ -483,196 +489,217 @@ export default function App() {
   background-color: black;
   cursor: zoom-out;
 }
-          }
-          .local-video {
-            border: 2px solid #5e3aae;
-          }
-            .video-main {
-  width: 100%;
-  height: 100%;
-  background: black;
+
+.local-video {
+  border: 2px solid #5e3aae;
 }
-  .video-main video {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+
+.remote-video {
+  border: 2px solid #b54fe1;
 }
-          .remote-video {
-            border: 2px solid #b54fe1;
-          }
-          .remote-small-window {
-            position: fixed;
-            width: 180px;
-            height: 135px;
-            border: 2px solid #b54fe1;
-            border-radius: 12px;
-            overflow: hidden;
-            background: #2a2450;
-            box-shadow: 0 0 12px #b54fe1;
-            cursor: grab;
-            z-index: 9999;
-            user-select: none;
-            top: ${remotePos.y}px;
-            left: ${remotePos.x}px;
-          }
-          .controls {
-            display: flex;
-            justify-content: center;
-            margin-top: 12px;
-            gap: 12px;
-          }
-          button {
-            border: none;
-            background: #5e3aae;
-            color: white;
-            padding: 12px;
-            border-radius: 50%;
-            font-size: 1.2rem;
-            width: 56px;
-            height: 56px;
-            box-shadow: 0 0 12px #7a0bc0;
-            cursor: pointer;
-            transition: background-color 0.3s ease, transform 0.2s ease;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-          }
-          button:hover {
-            background: #b54fe1;
-            transform: scale(1.1);
-            box-shadow: 0 0 20px #d48eff;
-          }
-          button:active {
-            transform: scale(0.95);
-          }
-          button.disabled {
-            background: #44415a;
-            cursor: not-allowed;
-            box-shadow: none;
-          }
-          footer {
-            margin-top: 14px;
-            text-align: center;
-            font-size: 0.9rem;
-            color: #7b70a7;
-          }
+
+.remote-small-window {
+  position: fixed;
+  width: 180px;
+  height: 135px;
+  border: 2px solid #b54fe1;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #2a2450;
+  box-shadow: 0 0 12px #b54fe1;
+  cursor: grab;
+  z-index: 9999;
+  user-select: none;
+  /* Imposta top/left inline da React */
+}
+
+.controls {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+  gap: 12px;
+}
+
+button {
+  border: none;
+  background: #5e3aae;
+  color: white;
+  padding: 12px;
+  border-radius: 50%;
+  font-size: 1.2rem;
+  width: 56px;
+  height: 56px;
+  box-shadow: 0 0 12px #7a0bc0;
+  cursor: pointer;
+  transition: background-color 0.3s ease, transform 0.2s ease;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+button:hover {
+  background: #b54fe1;
+  transform: scale(1.1);
+  box-shadow: 0 0 20px #d48eff;
+}
+
+button:active {
+  transform: scale(0.95);
+}
+
+button:focus {
+  outline: 2px solid #b54fe1;
+  outline-offset: 2px;
+}
+
+button.disabled {
+  background: #44415a;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+footer {
+  margin-top: 14px;
+  text-align: center;
+  font-size: 0.9rem;
+  color: #7b70a7;
+}
+
         `}</style>
 
       <div
-  className="app-container"
-  ref={containerRef}
-  onMouseMove={onMouseMove}
-  onMouseUp={onMouseUp}
-  onMouseLeave={onMouseUp}
->
-  <header>Video Chat React - Fullscreen & Sharing</header>
+        className="app-container"
+        ref={containerRef}
+        onMouseMove={onMouseMove}
+        onMouseUp={onMouseUp}
+        onMouseLeave={onMouseUp}
+      >
+        <header>Video Chat React - Fullscreen & Sharing</header>
 
-  <div className="status">
-    Stato WebSocket: {isConnected ? "Connesso" : "Disconnesso"} — Chiamata: {inCall ? "Attiva" : "Nessuna"}
-  </div>
-
-  <div className="videos-container">
-    {mainStreamType === 'camera' ? (
-      <>
-        {/* Camera in grande */}
-        <div className="video-main">
-          <video ref={localVideoRef} autoPlay muted playsInline />
+        <div className="status">
+          Stato WebSocket: {isConnected ? "Connesso" : "Disconnesso"} —
+          Chiamata: {inCall ? "Attiva" : "Nessuna"}
         </div>
 
-        {/* Screen share in piccolo (se attivo) */}
-        {isScreenSharing && (
+        <div className="videos-container">
+          {mainStreamType === "camera" ? (
+            <>
+              {/* CAMERA IN GRANDE */}
+              <div className="video-main">
+                <video ref={localVideoRef} autoPlay muted playsInline />
+              </div>
+
+              {/* SCREEN SHARE IN PIP */}
+              {isScreenSharing && (
+                <div
+                  className="video-pip"
+                  style={{ top: pipPosition.top, left: pipPosition.left }}
+                  onMouseDown={handleDrag}
+                  onClick={toggleMainStream}
+                >
+                  <video ref={screenVideoRef} autoPlay muted playsInline />
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {/* SCREEN SHARE IN GRANDE */}
+              <div className="video-main">
+                <video ref={screenVideoRef} autoPlay muted playsInline />
+              </div>
+
+              {/* CAMERA IN PIP */}
+              <div
+                className="video-pip"
+                style={{ top: pipPosition.top, left: pipPosition.left }}
+                onMouseDown={handleDrag}
+                onClick={toggleMainStream}
+              >
+                <video ref={localVideoRef} autoPlay muted playsInline />
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Finestrella remota mobile solo se fullscreen e condivisione schermo */}
+        {isFullScreen && isScreenSharing && inCall && (
           <div
-            className="video-pip"
-            style={{ top: pipPosition.top, left: pipPosition.left }}
-            onMouseDown={handleDrag}
-            onClick={toggleMainStream}
+            className="remote-small-window"
+            style={{ top: remotePos.y, left: remotePos.x }}
+            onMouseDown={onMouseDown}
           >
-            <video ref={screenVideoRef} autoPlay muted playsInline />
+            <video
+              ref={remoteSmallRef}
+              autoPlay
+              muted
+              playsInline
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
           </div>
         )}
-      </>
-    ) : (
-      <>
-        {/* Screen share in grande */}
-        <div className="video-main">
-          <video ref={screenVideoRef} autoPlay muted playsInline />
-        </div>
+      </div>
 
-        {/* Camera in piccolo */}
-        <div
-          className="video-pip"
-          style={{ top: pipPosition.top, left: pipPosition.left }}
-          onMouseDown={handleDrag}
-          onClick={toggleMainStream}
-        >
-          <video ref={localVideoRef} autoPlay muted playsInline />
-        </div>
-      </>
-    )}
-  </div>
+      <div className="controls">
+        {!inCall ? (
+          <button onClick={startCall} title="Avvia chiamata">
+            ▶️ Avvia
+          </button>
+        ) : (
+          <>
+            {/* Microfono */}
+            <button
+              onClick={toggleAudio}
+              title={audioEnabled ? "Disattiva microfono" : "Attiva microfono"}
+            >
+              {audioEnabled ? "🎤" : "🔇"}
+            </button>
 
-  {/* Riquadro video remoto mobile (se applicabile) */}
-  {inCall && remoteVideoVisible && (
-    <div
-      className="remote-small-window"
-      style={{ top: remotePos.y, left: remotePos.x }}
-      onMouseDown={onMouseDown}
-    >
-      <video
-        ref={remoteSmallRef}
-        autoPlay
-        muted
-        playsInline
-        style={{ width: "100%", height: "100%", objectFit: "cover" }}
-      />
-    </div>
-  )}
+            {/* Videocamera */}
+            <button
+              onClick={toggleVideo}
+              title={
+                videoEnabled ? "Disattiva videocamera" : "Attiva videocamera"
+              }
+            >
+              {videoEnabled ? "📷" : "🚫"}
+            </button>
 
-  <div className="controls">
-    {!inCall ? (
-      <button onClick={startCall} title="Avvia chiamata">
-        ▶️
-      </button>
-    ) : (
-      <>
-        <button
-          onClick={toggleAudio}
-          title={audioEnabled ? "Disattiva microfono" : "Attiva microfono"}
-        >
-          {audioEnabled ? "🎤" : "🔇"}
-        </button>
-        <button
-          onClick={toggleVideo}
-          title={videoEnabled ? "Disattiva videocamera" : "Attiva videocamera"}
-        >
-          {videoEnabled ? "📷" : "🚫"}
-        </button>
-        <button
-          onClick={toggleScreenShare}
-          title={isScreenSharing ? "Ferma condivisione schermo" : "Condividi schermo"}
-        >
-          {isScreenSharing ? "🛑" : "🖥️"}
-        </button>
-        <button
-          onClick={toggleMainStream}
-          title="Inverti visualizzazione"
-        >
-          🔁
-        </button>
-        <button
-          onClick={endCall}
-          title="Termina chiamata"
-          style={{ background: "#c0392b" }}
-        >
-          ❌
-        </button>
-      </>
-    )}
-  </div>
+            {/* Condivisione schermo */}
+            <button
+              onClick={toggleScreenShare}
+              title={
+                isScreenSharing
+                  ? "Ferma condivisione schermo"
+                  : "Condividi schermo"
+              }
+            >
+              {isScreenSharing ? "🛑" : "🖥️"}
+            </button>
 
-  <footer>Realizzato con React & WebRTC</footer>
-</div>
+            {/* Fullscreen */}
+            <button
+              onClick={toggleFullScreen}
+              title={isFullScreen ? "Esci da fullscreen" : "Fullscreen"}
+            >
+              {isFullScreen ? "🡼" : "🡾"}
+            </button>
 
+            {/* Termina chiamata */}
+            <button
+              onClick={endCall}
+              title="Termina chiamata"
+              style={{ background: "#c0392b", color: "#fff" }}
+            >
+              ❌
+            </button>
+          </>
+        )}
+      </div>
+
+      <footer>
+        Realizzato con React & WebRTC —{" "}
+        <small>Trascina la finestra della webcam remota in fullscreen</small>
+      </footer>
     </>
   );
 }
