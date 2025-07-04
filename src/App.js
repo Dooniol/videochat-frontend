@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from "react";
 
-const SIGNALING_SERVER_URL = 'wss://videochat-signaling-server.onrender.com';
+const SIGNALING_SERVER_URL = "wss://videochat-signaling-server.onrender.com";
 
 export default function App() {
   const localVideoRef = useRef(null);
@@ -29,7 +29,7 @@ export default function App() {
     wsRef.current = new WebSocket(SIGNALING_SERVER_URL);
 
     wsRef.current.onopen = () => {
-      console.log('WebSocket connected');
+      console.log("WebSocket connected");
       setIsConnected(true);
     };
 
@@ -37,42 +37,45 @@ export default function App() {
       try {
         let data;
 
-        if (typeof message.data === 'string') {
+        if (typeof message.data === "string") {
           data = JSON.parse(message.data);
         } else {
           return;
         }
 
         switch (data.type) {
-          case 'offer':
+          case "offer":
             await handleOffer(data.offer);
             break;
-          case 'answer':
+          case "answer":
             await handleAnswer(data.answer);
             break;
-          case 'candidate':
+          case "candidate":
             if (data.candidate && pcRef.current) {
-              if (pcRef.current.remoteDescription && pcRef.current.remoteDescription.type) {
+              if (
+                pcRef.current.remoteDescription &&
+                pcRef.current.remoteDescription.type
+              ) {
                 await pcRef.current.addIceCandidate(data.candidate);
               } else {
                 pendingCandidatesRef.current.push(data.candidate);
               }
             }
             break;
-          case 'hangup':
+          case "hangup":
             endCall();
             break;
-          case 'error':
+          case "error":
             alert(`Errore server: ${data.message}`);
             break;
         }
       } catch (e) {
-        console.error('Error handling message', e);
+        console.error("Error handling message", e);
       }
     };
 
     wsRef.current.onerror = (err) => {
-      console.error('WebSocket error:', err);
+      console.error("WebSocket error:", err);
     };
 
     wsRef.current.onclose = () => {
@@ -89,19 +92,23 @@ export default function App() {
 
   function stopLocalStream() {
     if (localVideoRef.current?.srcObject) {
-      localVideoRef.current.srcObject.getTracks().forEach((track) => track.stop());
+      localVideoRef.current.srcObject
+        .getTracks()
+        .forEach((track) => track.stop());
       localVideoRef.current.srcObject = null;
     }
   }
 
   async function createPeerConnection() {
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
 
     pc.onicecandidate = (event) => {
       if (event.candidate && wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
+        wsRef.current.send(
+          JSON.stringify({ type: "candidate", candidate: event.candidate })
+        );
       }
     };
 
@@ -122,7 +129,10 @@ export default function App() {
     await createPeerConnection();
 
     try {
-      const localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const localStream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true,
+      });
       if (localVideoRef.current) localVideoRef.current.srcObject = localStream;
 
       localStream.getTracks().forEach((track) => {
@@ -132,7 +142,7 @@ export default function App() {
       const offer = await pcRef.current.createOffer();
       await pcRef.current.setLocalDescription(offer);
 
-      wsRef.current?.send(JSON.stringify({ type: 'offer', offer }));
+      wsRef.current?.send(JSON.stringify({ type: "offer", offer }));
 
       setInCall(true);
       setIsScreenSharing(false);
@@ -140,7 +150,7 @@ export default function App() {
       setVideoEnabled(true);
       setMaximizedVideo(null);
     } catch (err) {
-      alert('Errore nell\'ottenere media locale: ' + err.message);
+      alert("Errore nell'ottenere media locale: " + err.message);
     }
   }
 
@@ -148,7 +158,10 @@ export default function App() {
     await createPeerConnection();
 
     try {
-      const localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const localStream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true,
+      });
       if (localVideoRef.current) localVideoRef.current.srcObject = localStream;
 
       localStream.getTracks().forEach((track) => {
@@ -165,7 +178,7 @@ export default function App() {
       const answer = await pcRef.current.createAnswer();
       await pcRef.current.setLocalDescription(answer);
 
-      wsRef.current?.send(JSON.stringify({ type: 'answer', answer }));
+      wsRef.current?.send(JSON.stringify({ type: "answer", answer }));
 
       setInCall(true);
       setIsScreenSharing(false);
@@ -173,7 +186,7 @@ export default function App() {
       setVideoEnabled(true);
       setMaximizedVideo(null);
     } catch (err) {
-      alert('Errore nell\'ottenere media locale per risposta: ' + err.message);
+      alert("Errore nell'ottenere media locale per risposta: " + err.message);
     }
   }
 
@@ -190,7 +203,7 @@ export default function App() {
 
   function endCall() {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'hangup' }));
+      wsRef.current.send(JSON.stringify({ type: "hangup" }));
     }
 
     pcRef.current?.close();
@@ -230,40 +243,60 @@ export default function App() {
     }
 
     try {
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-      const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true,
+      });
+      const micStream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+      });
 
       const combinedStream = new MediaStream();
 
-      screenStream.getVideoTracks().forEach((track) => combinedStream.addTrack(track));
-      micStream.getAudioTracks().forEach((track) => combinedStream.addTrack(track));
-      screenStream.getAudioTracks().forEach((track) => combinedStream.addTrack(track));
+      screenStream
+        .getVideoTracks()
+        .forEach((track) => combinedStream.addTrack(track));
+      micStream
+        .getAudioTracks()
+        .forEach((track) => combinedStream.addTrack(track));
+      screenStream
+        .getAudioTracks()
+        .forEach((track) => combinedStream.addTrack(track));
 
-      const videoSender = pcRef.current.getSenders().find((s) => s.track?.kind === 'video');
-      const audioSender = pcRef.current.getSenders().find((s) => s.track?.kind === 'audio');
+      const videoSender = pcRef.current
+        .getSenders()
+        .find((s) => s.track?.kind === "video");
+      const audioSender = pcRef.current
+        .getSenders()
+        .find((s) => s.track?.kind === "audio");
 
-      if (videoSender) await videoSender.replaceTrack(combinedStream.getVideoTracks()[0]);
+      if (videoSender)
+        await videoSender.replaceTrack(combinedStream.getVideoTracks()[0]);
       if (audioSender && combinedStream.getAudioTracks().length > 0)
         await audioSender.replaceTrack(combinedStream.getAudioTracks()[0]);
 
-      if (localVideoRef.current) localVideoRef.current.srcObject = combinedStream;
+      if (localVideoRef.current)
+        localVideoRef.current.srcObject = combinedStream;
 
       screenStream.getVideoTracks()[0].onended = () => stopScreenShare();
 
       setIsScreenSharing(true);
       setVideoEnabled(true);
     } catch (err) {
-      alert('Errore nella condivisione schermo: ' + err.message);
+      alert("Errore nella condivisione schermo: " + err.message);
     }
   }
 
   function stopScreenShare() {
     if (!isScreenSharing) return;
 
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    navigator.mediaDevices
+      .getUserMedia({ video: true, audio: true })
       .then(async (stream) => {
         const videoTrack = stream.getVideoTracks()[0];
-        const sender = pcRef.current.getSenders().find((s) => s.track.kind === 'video');
+        const sender = pcRef.current
+          .getSenders()
+          .find((s) => s.track.kind === "video");
         if (sender) await sender.replaceTrack(videoTrack);
 
         if (localVideoRef.current) localVideoRef.current.srcObject = stream;
@@ -271,7 +304,7 @@ export default function App() {
         setIsScreenSharing(false);
       })
       .catch((err) => {
-        alert('Errore nel ripristino webcam: ' + err.message);
+        alert("Errore nel ripristino webcam: " + err.message);
       });
   }
 
@@ -315,148 +348,159 @@ export default function App() {
     draggingRef.current = false;
   }
 
-  // Al click su video ingrandisce/schermo intero o resetta
-  function onVideoClick(videoType) {
-    if (maximizedVideo === videoType) {
+  /**
+   * Gestisce il “focus” (pseudo‑fullscreen in‑page) di uno dei video.
+   * Non usa la Fullscreen API, ma una classe CSS che espande il video
+   * a coprire tutto .videos-container.
+   *
+   * @param {'local'|'remote'} type
+   */
+  function onVideoClick(type) {
+    // Se riclicchi sullo stesso video, torni alla vista normale
+    if (maximizedVideo === type) {
       setMaximizedVideo(null);
     } else {
-      setMaximizedVideo(videoType);
+      setMaximizedVideo(type);
     }
   }
 
   return (
     <>
       <style>{`
-        * {
-          box-sizing: border-box;
-        }
-        body, html, #root {
-          margin: 0; padding: 0; height: 100%;
-          background: #1c1c2e;
-          color: #ddd;
-          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-          user-select: none;
-          overflow: hidden;
-        }
-        .app-container {
-          height: 100%;
-          display: flex;
-          flex-direction: column;
-          border-top: 6px solid linear-gradient(90deg, #7a0bc0, #b54fe1);
-          background: linear-gradient(135deg, #2a2450, #1c1c2e);
-          padding: 12px;
-        }
-        header {
-          font-size: 1.5rem;
-          font-weight: 700;
-          text-align: center;
-          margin-bottom: 8px;
-          letter-spacing: 0.1em;
-          color: #b54fe1;
-          text-shadow: 0 0 8px #a057d5;
-        }
-        .status {
-          text-align: center;
-          margin-bottom: 10px;
-          font-weight: 600;
-          color: #8e7cc3;
-        }
-        .videos-container {
-          flex-grow: 1;
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          position: relative;
-          gap: 10px;
-          background: #222040;
-          border-radius: 12px;
-          padding: 8px;
-          overflow: hidden;
-        }
-        video {
-          border-radius: 12px;
-          background: black;
-          cursor: pointer;
-          object-fit: cover;
-          transition: box-shadow 0.3s ease;
-          box-shadow: 0 0 4px #5533aa;
-          max-height: 300px;
-          max-width: 45vw;
-          user-select: none;
-        }
-        video:hover {
-          box-shadow: 0 0 16px #b54fe1;
-        }
-        .video-maximized {
-          max-width: 95vw !important;
-          max-height: 95vh !important;
-          box-shadow: 0 0 40px #b54fe1;
-          border: 3px solid #b54fe1;
-          cursor: zoom-out;
-        }
-        .local-video {
-          border: 2px solid #5e3aae;
-        }
-        .remote-video {
-          border: 2px solid #b54fe1;
-        }
-        .remote-small-window {
-          position: fixed;
-          width: 180px;
-          height: 135px;
-          border: 2px solid #b54fe1;
-          border-radius: 12px;
-          overflow: hidden;
-          background: #2a2450;
-          box-shadow: 0 0 12px #b54fe1;
-          cursor: grab;
-          z-index: 9999;
-          user-select: none;
-          top: ${remotePos.y}px;
-          left: ${remotePos.x}px;
-        }
-        .controls {
-          display: flex;
-          justify-content: center;
-          margin-top: 12px;
-          gap: 12px;
-        }
-        button {
-          border: none;
-          background: #5e3aae;
-          color: white;
-          padding: 12px;
-          border-radius: 50%;
-          font-size: 1.2rem;
-          width: 56px;
-          height: 56px;
-          box-shadow: 0 0 12px #7a0bc0;
-          cursor: pointer;
-          transition: background-color 0.3s ease, transform 0.2s ease;
-          display: flex;
-          justify-content: center;
-          align-items: center;
-        }
-        button:hover {
-          background: #b54fe1;
-          transform: scale(1.1);
-          box-shadow: 0 0 20px #d48eff;
-        }
-        button:active {
-          transform: scale(0.95);
-        }
-        button.disabled {
-          background: #44415a;
-          cursor: not-allowed;
-          box-shadow: none;
-        }
-        footer {
-          margin-top: 14px;
-          text-align: center;
-          font-size: 0.9rem;
-          color: #7b70a7;
-        }
-      `}</style>
+          * {
+            box-sizing: border-box;
+          }
+          body, html, #root {
+            margin: 0; padding: 0; height: 100%;
+            background: #1c1c2e;
+            color: #ddd;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none;
+            overflow: hidden;
+          }
+          .app-container {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            border-top: 6px solid linear-gradient(90deg, #7a0bc0, #b54fe1);
+            background: linear-gradient(135deg, #2a2450, #1c1c2e);
+            padding: 12px;
+          }
+          header {
+            font-size: 1.5rem;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 8px;
+            letter-spacing: 0.1em;
+            color: #b54fe1;
+            text-shadow: 0 0 8px #a057d5;
+          }
+          .status {
+            text-align: center;
+            margin-bottom: 10px;
+            font-weight: 600;
+            color: #8e7cc3;
+          }
+          .videos-container {
+            flex-grow: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            gap: 10px;
+            background: #222040;
+            border-radius: 12px;
+            padding: 8px;
+            overflow: hidden;
+          }
+          video {
+            border-radius: 12px;
+            background: black;
+            cursor: pointer;
+            object-fit: cover;
+            transition: box-shadow 0.3s ease;
+            box-shadow: 0 0 4px #5533aa;
+            max-height: 300px;
+            max-width: 45vw;
+            user-select: none;
+          }
+          video:hover {
+            box-shadow: 0 0 16px #b54fe1;
+          }
+          .video-maximized {
+            position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    z-index: 20 !important;
+    box-shadow: 0 0 40px #b54fe1 !important;
+    border: 3px solid #b54fe1 !important;
+    cursor: zoom-out !important;
+          }
+          .local-video {
+            border: 2px solid #5e3aae;
+          }
+          .remote-video {
+            border: 2px solid #b54fe1;
+          }
+          .remote-small-window {
+            position: fixed;
+            width: 180px;
+            height: 135px;
+            border: 2px solid #b54fe1;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #2a2450;
+            box-shadow: 0 0 12px #b54fe1;
+            cursor: grab;
+            z-index: 9999;
+            user-select: none;
+            top: ${remotePos.y}px;
+            left: ${remotePos.x}px;
+          }
+          .controls {
+            display: flex;
+            justify-content: center;
+            margin-top: 12px;
+            gap: 12px;
+          }
+          button {
+            border: none;
+            background: #5e3aae;
+            color: white;
+            padding: 12px;
+            border-radius: 50%;
+            font-size: 1.2rem;
+            width: 56px;
+            height: 56px;
+            box-shadow: 0 0 12px #7a0bc0;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+          }
+          button:hover {
+            background: #b54fe1;
+            transform: scale(1.1);
+            box-shadow: 0 0 20px #d48eff;
+          }
+          button:active {
+            transform: scale(0.95);
+          }
+          button.disabled {
+            background: #44415a;
+            cursor: not-allowed;
+            box-shadow: none;
+          }
+          footer {
+            margin-top: 14px;
+            text-align: center;
+            font-size: 0.9rem;
+            color: #7b70a7;
+          }
+        `}</style>
 
       <div
         className="app-container"
@@ -468,10 +512,14 @@ export default function App() {
         <header>Video Chat React - Fullscreen & Sharing</header>
 
         <div className="status">
-          Stato WebSocket: {isConnected ? 'Connesso' : 'Disconnesso'} — Chiamata: {inCall ? 'Attiva' : 'Nessuna'}
+          Stato WebSocket: {isConnected ? "Connesso" : "Disconnesso"} —
+          Chiamata: {inCall ? "Attiva" : "Nessuna"}
         </div>
 
-        <div className="videos-container" style={{ cursor: isFullScreen ? 'default' : 'pointer' }}>
+        <div
+          className="videos-container"
+          style={{ cursor: isFullScreen ? "default" : "pointer" }}
+        >
           {/* Local video */}
           <video
             ref={localVideoRef}
@@ -479,9 +527,9 @@ export default function App() {
             muted
             playsInline
             className={`local-video ${
-              maximizedVideo === 'local' ? 'video-maximized' : ''
+              maximizedVideo === "local" ? "video-maximized" : ""
             }`}
-            onClick={() => onVideoClick('local')}
+            onClick={() => onVideoClick("local")}
           />
 
           {/* Remote video */}
@@ -490,9 +538,9 @@ export default function App() {
             autoPlay
             playsInline
             className={`remote-video ${
-              maximizedVideo === 'remote' ? 'video-maximized' : ''
+              maximizedVideo === "remote" ? "video-maximized" : ""
             }`}
-            onClick={() => onVideoClick('remote')}
+            onClick={() => onVideoClick("remote")}
           />
 
           {/* Finestrella remota mobile solo se fullscreen e condivisione schermo */}
@@ -507,7 +555,7 @@ export default function App() {
                 autoPlay
                 muted
                 playsInline
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
               />
             </div>
           )}
@@ -515,22 +563,48 @@ export default function App() {
 
         <div className="controls">
           {!inCall ? (
-            <button onClick={startCall} title="Avvia chiamata">▶️</button>
+            <button onClick={startCall} title="Avvia chiamata">
+              ▶️
+            </button>
           ) : (
             <>
-              <button onClick={toggleAudio} title={audioEnabled ? 'Disattiva microfono' : 'Attiva microfono'}>
-                {audioEnabled ? '🎤' : '🔇'}
+              <button
+                onClick={toggleAudio}
+                title={
+                  audioEnabled ? "Disattiva microfono" : "Attiva microfono"
+                }
+              >
+                {audioEnabled ? "🎤" : "🔇"}
               </button>
-              <button onClick={toggleVideo} title={videoEnabled ? 'Disattiva videocamera' : 'Attiva videocamera'}>
-                {videoEnabled ? '📷' : '🚫'}
+              <button
+                onClick={toggleVideo}
+                title={
+                  videoEnabled ? "Disattiva videocamera" : "Attiva videocamera"
+                }
+              >
+                {videoEnabled ? "📷" : "🚫"}
               </button>
-              <button onClick={toggleScreenShare} title={isScreenSharing ? 'Ferma condivisione schermo' : 'Condividi schermo'}>
-                {isScreenSharing ? '🛑' : '🖥️'}
+              <button
+                onClick={toggleScreenShare}
+                title={
+                  isScreenSharing
+                    ? "Ferma condivisione schermo"
+                    : "Condividi schermo"
+                }
+              >
+                {isScreenSharing ? "🛑" : "🖥️"}
               </button>
-              <button onClick={toggleFullScreen} title={isFullScreen ? 'Esci da fullscreen' : 'Fullscreen'}>
-                {isFullScreen ? '🡼' : '🡾'}
+              <button
+                onClick={toggleFullScreen}
+                title={isFullScreen ? "Esci da fullscreen" : "Fullscreen"}
+              >
+                {isFullScreen ? "🡼" : "🡾"}
               </button>
-              <button onClick={endCall} title="Termina chiamata" style={{ background: '#c0392b' }}>
+              <button
+                onClick={endCall}
+                title="Termina chiamata"
+                style={{ background: "#c0392b" }}
+              >
                 ❌
               </button>
             </>
@@ -538,7 +612,8 @@ export default function App() {
         </div>
 
         <footer>
-          Realizzato con React & WebRTC — <small>Drag finestra webcam remota in fullscreen</small>
+          Realizzato con React & WebRTC —{" "}
+          <small>Drag finestra webcam remota in fullscreen</small>
         </footer>
       </div>
     </>
