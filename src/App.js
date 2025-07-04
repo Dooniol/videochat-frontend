@@ -19,8 +19,8 @@ export default function App() {
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [maximizedVideo, setMaximizedVideo] = useState(null); // 'local' | 'remote' | null
   const [isFullScreen, setIsFullScreen] = useState(false);
-  const [mainStreamType, setMainStreamType] =
-    (useState < "screen") | ("camera" > "camera");
+  const [mainStreamType, setMainStreamType] = useState("camera");
+
   const [pipPosition, setPipPosition] = useState({ top: 20, left: 20 });
 
   // Posizione finestrella remota draggable
