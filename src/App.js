@@ -205,6 +205,49 @@ export default function App() {
     }
   }
 
+  const handleDrag = (event) => {
+    event.preventDefault();
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+
+    const handleMouseMove = (moveEvent) => {
+      const dx = moveEvent.clientX - startX;
+      const dy = moveEvent.clientY - startY;
+
+      setPipPosition((prev) => ({
+        top: Math.max(0, prev.top + dy),
+        left: Math.max(0, prev.left + dx),
+      }));
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+  };
+
+  const toggleAudio = () => {
+    setAudioEnabled((prev) => {
+      localStream.getAudioTracks().forEach((track) => {
+        track.enabled = !prev;
+      });
+      return !prev;
+    });
+  };
+
+  const toggleVideo = () => {
+    setVideoEnabled((prev) => {
+      localStream.getVideoTracks().forEach((track) => {
+        track.enabled = !prev;
+      });
+      return !prev;
+    });
+  };
+
   function endCall() {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "hangup" }));
