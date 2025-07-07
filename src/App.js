@@ -7,6 +7,7 @@ export default function App() {
   const remoteVideoRef = useRef(null);
   const containerRef = useRef(null);
   const remoteSmallRef = useRef(null);
+  const screenVideoRef = useRef(null); // AGGIUNTO
 
   const pcRef = useRef(null);
   const wsRef = useRef(null);
@@ -227,43 +228,6 @@ export default function App() {
     setMainStreamType((prev) => (prev === "camera" ? "screen" : "camera"));
   }
 
-  function handleDrag(e) {
-    const pip = e.currentTarget;
-    let shiftX = e.clientX - pip.getBoundingClientRect().left;
-    let shiftY = e.clientY - pip.getBoundingClientRect().top;
-
-    function moveAt(pageX, pageY) {
-      setPipPosition({ top: pageY - shiftY, left: pageX - shiftX });
-    }
-
-    function onMouseMove(e) {
-      moveAt(e.pageX, e.pageY);
-    }
-
-    document.addEventListener("mousemove", onMouseMove);
-
-    pip.onmouseup = function () {
-      document.removeEventListener("mousemove", onMouseMove);
-      pip.onmouseup = null;
-    };
-  }
-
-  function toggleAudio() {
-    if (!localVideoRef.current?.srcObject) return;
-    const audioTracks = localVideoRef.current.srcObject.getAudioTracks();
-    if (audioTracks.length === 0) return;
-    audioTracks[0].enabled = !audioTracks[0].enabled;
-    setAudioEnabled(audioTracks[0].enabled);
-  }
-
-  function toggleVideo() {
-    if (!localVideoRef.current?.srcObject) return;
-    const videoTracks = localVideoRef.current.srcObject.getVideoTracks();
-    if (videoTracks.length === 0) return;
-    videoTracks[0].enabled = !videoTracks[0].enabled;
-    setVideoEnabled(videoTracks[0].enabled);
-  }
-
   async function toggleScreenShare() {
     if (isScreenSharing) {
       stopScreenShare();
@@ -306,6 +270,9 @@ export default function App() {
       if (localVideoRef.current)
         localVideoRef.current.srcObject = combinedStream;
 
+      if (screenVideoRef.current)
+        screenVideoRef.current.srcObject = screenStream; // AGGIUNTO
+
       screenStream.getVideoTracks()[0].onended = () => stopScreenShare();
 
       setIsScreenSharing(true);
@@ -328,6 +295,8 @@ export default function App() {
         if (sender) await sender.replaceTrack(videoTrack);
 
         if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+
+        if (screenVideoRef.current) screenVideoRef.current.srcObject = null; // AGGIUNTO
 
         setIsScreenSharing(false);
       })
