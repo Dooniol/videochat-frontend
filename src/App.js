@@ -285,10 +285,6 @@ export default function App() {
     pendingCandidatesRef.current = [];
   }
 
-  function toggleMainStream() {
-    setMainStreamType((prev) => (prev === "camera" ? "screen" : "camera"));
-  }
-
   async function toggleScreenShare() {
     if (isScreenSharing) {
       stopScreenShare();
