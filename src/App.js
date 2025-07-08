@@ -21,6 +21,7 @@ export default function App() {
   const [maximizedVideo, setMaximizedVideo] = useState(null); // 'local' | 'remote' | null
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [mainStreamType, setMainStreamType] = useState("camera");
+  const [roomId, setRoomId] = useState("default-room");
 
   const [pipPosition, setPipPosition] = useState({ top: 20, left: 20 });
 
@@ -151,6 +152,7 @@ export default function App() {
         .forEach((track) => track.stop());
       localVideoRef.current.srcObject = null;
     }
+    setLocalStream(null);
   }
 
   async function createPeerConnection() {
@@ -180,42 +182,58 @@ export default function App() {
   }
 
   async function startCall() {
-    await createPeerConnection();
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      console.error("WebSocket non connesso.");
+      return;
+    }
+
+    if (!roomId) {
+      console.error("roomId non definito.");
+      return;
+    }
 
     try {
-      // Richiedi accesso a webcam e microfono
+      await createPeerConnection();
+
       const localStream = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true,
       });
 
-      // Salva lo stream nello stato per poterlo usare altrove (es. toggleAudio/video)
       setLocalStream(localStream);
 
-      // Mostra il video locale nel player
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = localStream;
       }
 
-      // Aggiungi tracce audio/video alla connessione peer
+      const peerConnection = pcRef.current;
+      if (!peerConnection) {
+        console.error("Peer connection non inizializzata.");
+        return;
+      }
+
+      // Aggiunge le tracce dello stream locale alla peer connection
       localStream.getTracks().forEach((track) => {
-        pcRef.current.addTrack(track, localStream);
+        peerConnection.addTrack(track, localStream);
       });
 
-      // Crea l'offerta WebRTC
-      const offer = await pcRef.current.createOffer();
-      await pcRef.current.setLocalDescription(offer);
+      // Crea l'offerta SDP
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
 
-      // Invia l'offerta al server remoto
-      socketRef.current.emit("offer", {
-        sdp: offer,
-        roomId: roomId,
-      });
+      // Invia l'offerta tramite WebSocket
+      wsRef.current.send(
+        JSON.stringify({
+          type: "offer",
+          offer: offer,
+          roomId: roomId,
+        })
+      );
 
-      console.log("Chiamata avviata");
+      console.log("✅ Offerta inviata. Chiamata avviata.");
     } catch (error) {
-      console.error("Errore nell'accesso a webcam/microfono:", error);
-      alert("Impossibile accedere a webcam o microfono. Verifica i permessi.");
+      console.error("❌ Errore durante l'avvio della chiamata:", error);
+      alert("Impossibile accedere a webcam o microfono. Controlla i permessi.");
     }
   }
 
@@ -287,78 +305,118 @@ export default function App() {
 
   async function toggleScreenShare() {
     if (isScreenSharing) {
+      // Se la condivisione dello schermo è attiva, interrompila
       stopScreenShare();
       return;
     }
 
     try {
+      // ✅ Richiede l'accesso al contenuto dello schermo (può includere l'audio di sistema su alcuni browser)
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
-        audio: true,
+        audio: true, // L'audio potrebbe non essere disponibile su tutti i browser o sistemi
       });
+
+      // ✅ Richiede il microfono separatamente per poterlo combinare con lo screen share
       const micStream = await navigator.mediaDevices.getUserMedia({
         audio: true,
       });
 
+      // ✅ Crea un nuovo MediaStream che combinerà audio e video da sorgenti diverse
       const combinedStream = new MediaStream();
 
-      screenStream
-        .getVideoTracks()
-        .forEach((track) => combinedStream.addTrack(track));
-      micStream
-        .getAudioTracks()
-        .forEach((track) => combinedStream.addTrack(track));
-      screenStream
-        .getAudioTracks()
-        .forEach((track) => combinedStream.addTrack(track));
+      // ✅ Aggiunge la traccia video dello schermo
+      screenStream.getVideoTracks().forEach((track) => {
+        combinedStream.addTrack(track);
+      });
 
+      // ✅ Aggiunge la traccia audio dal microfono
+      micStream.getAudioTracks().forEach((track) => {
+        combinedStream.addTrack(track);
+      });
+
+      // ❌ Non aggiungiamo anche l'audio dello schermo per evitare duplicati o echo
+      // Se necessario (es. per registrare anche l'audio di un video YouTube condiviso), puoi scommentare:
+      /*
+    screenStream.getAudioTracks().forEach((track) => {
+      combinedStream.addTrack(track);
+    });
+    */
+
+      // ✅ Trova i sender WebRTC attivi per video e audio
       const videoSender = pcRef.current
         .getSenders()
         .find((s) => s.track?.kind === "video");
+
       const audioSender = pcRef.current
         .getSenders()
         .find((s) => s.track?.kind === "audio");
 
-      if (videoSender)
+      // ✅ Sostituisce la traccia video con quella del nuovo stream (schermo)
+      if (videoSender && combinedStream.getVideoTracks().length > 0) {
         await videoSender.replaceTrack(combinedStream.getVideoTracks()[0]);
-      if (audioSender && combinedStream.getAudioTracks().length > 0)
+      }
+
+      // ✅ Sostituisce la traccia audio con quella combinata (microfono)
+      if (audioSender && combinedStream.getAudioTracks().length > 0) {
         await audioSender.replaceTrack(combinedStream.getAudioTracks()[0]);
+      }
 
-      if (localVideoRef.current)
+      // ✅ Aggiorna il video locale per mostrare lo stream combinato (utile per feedback visivo all'utente)
+      if (localVideoRef.current) {
         localVideoRef.current.srcObject = combinedStream;
+      }
 
-      if (screenVideoRef.current)
-        screenVideoRef.current.srcObject = screenStream; // AGGIUNTO
+      // ✅ (Opzionale) Mostra anche lo stream dello schermo in un secondo player, se presente
+      if (screenVideoRef.current) {
+        screenVideoRef.current.srcObject = screenStream;
+      }
 
+      // ✅ Se l'utente interrompe la condivisione dallo strumento di sistema, la fermiamo anche noi
       screenStream.getVideoTracks()[0].onended = () => stopScreenShare();
 
-      setIsScreenSharing(true);
-      setVideoEnabled(true);
+      // ✅ Aggiorniamo lo stato dell'applicazione
+      setIsScreenSharing(true); // Indica che lo screen share è attivo
+      setVideoEnabled(true); // Riattiva il flag per il video (se era disabilitato)
     } catch (err) {
+      // ❌ Gestione degli errori (permessi negati, problemi con il dispositivo)
       alert("Errore nella condivisione schermo: " + err.message);
+      console.error("Errore durante screen share:", err);
     }
   }
 
   function stopScreenShare() {
+    // Se non stiamo condividendo lo schermo, esci subito
     if (!isScreenSharing) return;
 
+    // Richiedi di nuovo webcam e microfono
     navigator.mediaDevices
       .getUserMedia({ video: true, audio: true })
       .then(async (stream) => {
+        // Prendi la traccia video dalla webcam (prima traccia video disponibile)
         const videoTrack = stream.getVideoTracks()[0];
+
+        // Trova il sender WebRTC che invia il video attualmente
         const sender = pcRef.current
           .getSenders()
-          .find((s) => s.track.kind === "video");
+          .find((s) => s.track?.kind === "video");
+
+        // Se trovato, sostituisci la traccia video attiva con quella della webcam
         if (sender) await sender.replaceTrack(videoTrack);
 
+        // Aggiorna il video locale per mostrare il feed webcam
         if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
-        if (screenVideoRef.current) screenVideoRef.current.srcObject = null; // AGGIUNTO
+        // Rimuovi il feed dello schermo dall'elemento video dedicato (se presente)
+        if (screenVideoRef.current) screenVideoRef.current.srcObject = null;
 
+        // Aggiorna lo stato per indicare che la condivisione schermo è terminata
         setIsScreenSharing(false);
       })
       .catch((err) => {
+        // Gestione errori (ad esempio, permessi negati o problemi hardware)
         alert("Errore nel ripristino webcam: " + err.message);
+        console.error("Errore stopScreenShare:", err);
       });
   }
 
