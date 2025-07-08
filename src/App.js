@@ -29,6 +29,56 @@ export default function App() {
   const draggingRef = useRef(false);
   const dragOffset = useRef({ x: 0, y: 0 });
 
+  // ─── Conserva lo stream locale per poterlo poi silenziare/masterizzare ───
+  const [localStream, setLocalStream] = useState(null);
+
+  // ─── Funzione per trascinare il PIP ───
+  const handleDrag = (event) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startY = event.clientY;
+
+    const handleMouseMove = (moveEvent) => {
+      const dx = moveEvent.clientX - startX;
+      const dy = moveEvent.clientY - startY;
+      setPipPosition((prev) => ({
+        top: Math.max(0, prev.top + dy),
+        left: Math.max(0, prev.left + dx),
+      }));
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+  };
+
+  // ─── Funzione per attivare/disattivare il microfono ───
+  const toggleAudio = () => {
+    if (!localStream) return;
+    localStream.getAudioTracks().forEach((track) => {
+      track.enabled = !audioEnabled;
+    });
+    setAudioEnabled((prev) => !prev);
+  };
+
+  // ─── Funzione per attivare/disattivare la webcam ───
+  const toggleVideo = () => {
+    if (!localStream) return;
+    localStream.getVideoTracks().forEach((track) => {
+      track.enabled = !videoEnabled;
+    });
+    setVideoEnabled((prev) => !prev);
+  };
+
+  // ─── Switcha tra camera in grande e PIP (screen share) ───
+  const toggleMainStream = () => {
+    setMainStreamType((prev) => (prev === "camera" ? "screen" : "camera"));
+  };
+
   useEffect(() => {
     wsRef.current = new WebSocket(SIGNALING_SERVER_URL);
 
@@ -133,28 +183,39 @@ export default function App() {
     await createPeerConnection();
 
     try {
+      // Richiedi accesso a webcam e microfono
       const localStream = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true,
       });
-      if (localVideoRef.current) localVideoRef.current.srcObject = localStream;
 
+      // Salva lo stream nello stato per poterlo usare altrove (es. toggleAudio/video)
+      setLocalStream(localStream);
+
+      // Mostra il video locale nel player
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = localStream;
+      }
+
+      // Aggiungi tracce audio/video alla connessione peer
       localStream.getTracks().forEach((track) => {
         pcRef.current.addTrack(track, localStream);
       });
 
+      // Crea l'offerta WebRTC
       const offer = await pcRef.current.createOffer();
       await pcRef.current.setLocalDescription(offer);
 
-      wsRef.current?.send(JSON.stringify({ type: "offer", offer }));
+      // Invia l'offerta al server remoto
+      socketRef.current.emit("offer", {
+        sdp: offer,
+        roomId: roomId,
+      });
 
-      setInCall(true);
-      setIsScreenSharing(false);
-      setAudioEnabled(true);
-      setVideoEnabled(true);
-      setMaximizedVideo(null);
-    } catch (err) {
-      alert("Errore nell'ottenere media locale: " + err.message);
+      console.log("Chiamata avviata");
+    } catch (error) {
+      console.error("Errore nell'accesso a webcam/microfono:", error);
+      alert("Impossibile accedere a webcam o microfono. Verifica i permessi.");
     }
   }
 
@@ -204,49 +265,6 @@ export default function App() {
       pendingCandidatesRef.current = [];
     }
   }
-
-  const handleDrag = (event) => {
-    event.preventDefault();
-
-    const startX = event.clientX;
-    const startY = event.clientY;
-
-    const handleMouseMove = (moveEvent) => {
-      const dx = moveEvent.clientX - startX;
-      const dy = moveEvent.clientY - startY;
-
-      setPipPosition((prev) => ({
-        top: Math.max(0, prev.top + dy),
-        left: Math.max(0, prev.left + dx),
-      }));
-    };
-
-    const handleMouseUp = () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-    };
-
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
-  };
-
-  const toggleAudio = () => {
-    setAudioEnabled((prev) => {
-      localStream.getAudioTracks().forEach((track) => {
-        track.enabled = !prev;
-      });
-      return !prev;
-    });
-  };
-
-  const toggleVideo = () => {
-    setVideoEnabled((prev) => {
-      localStream.getVideoTracks().forEach((track) => {
-        track.enabled = !prev;
-      });
-      return !prev;
-    });
-  };
 
   function endCall() {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
