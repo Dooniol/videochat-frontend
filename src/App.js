@@ -421,15 +421,22 @@ export default function App() {
   }
 
   // Fullscreen a tutto schermo container o video local/remote
+  // Fullscreen a tutto schermo container o video local/remote
   async function toggleFullScreen() {
-    if (!document.fullscreenElement) {
-      if (containerRef.current) {
-        await containerRef.current.requestFullscreen();
-        setIsFullScreen(true);
+    try {
+      if (!document.fullscreenElement) {
+        if (containerRef.current?.requestFullscreen) {
+          await containerRef.current.requestFullscreen();
+          setIsFullScreen(true);
+        }
+      } else {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+          setIsFullScreen(false);
+        }
       }
-    } else {
-      await document.exitFullscreen();
-      setIsFullScreen(false);
+    } catch (err) {
+      console.error("Errore durante il toggle fullscreen:", err);
     }
   }
 
